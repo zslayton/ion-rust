@@ -1,13 +1,19 @@
 extern crate ion_rust;
 
-use ion_rust::result::IonResult;
-use ion_rust::{BinaryIonCursor, Cursor, IonDataSource, IonType, Reader};
+use std::collections::HashSet;
 use std::fs::File;
-use std::process::exit;
-
-use regex::bytes::Regex;
-use memmap::MmapOptions;
 use std::io;
+use std::process::exit;
+use std::rc::Rc;
+
+use failure::_core::cell::RefCell;
+use memmap::MmapOptions;
+use regex::bytes::Regex;
+
+use ion_rust::result::IonResult;
+use ion_rust::{
+    BinaryIonCursor, Cursor, IonDataSource, IonType, Reader, SymbolTable, SymbolTableEventHandler,
+};
 
 fn bail(args: &Vec<String>, text: &str, status: i32) -> ! {
     eprintln!(
@@ -40,28 +46,64 @@ fn main() -> IonResult<()> {
 
     let file = File::open(path)?;
 
-    let mut number_of_matches: usize = 0;
+    let number_of_matches: usize;
     if use_mmap {
         let mmap = unsafe { MmapOptions::new().map(&file)? };
         let bytes_cursor = io::Cursor::new(mmap);
         let cursor = BinaryIonCursor::new(bytes_cursor);
         let mut reader = Reader::new(cursor);
-        number_of_matches = grep(&pattern, &mut reader)?;
+        number_of_matches = grep(pattern, &mut reader)?;
     } else {
         let buf_reader = std::io::BufReader::new(file);
         let cursor = BinaryIonCursor::new(buf_reader);
         let mut reader = Reader::new(cursor);
-        number_of_matches = grep(&pattern, &mut reader)?;
+        number_of_matches = grep(pattern, &mut reader)?;
     }
     println!("Found {} matches", number_of_matches);
     Ok(())
 }
 
+struct SymbolPatternMatcher {
+    pattern: Regex,
+    cache: Rc<RefCell<HashSet<usize>>>,
+}
+
+impl SymbolTableEventHandler for SymbolPatternMatcher {
+    fn on_reset(&mut self, symbol_table: &SymbolTable) {
+        let mut cache = self.cache.borrow_mut();
+        for (id, symbol) in symbol_table.symbols().iter().enumerate() {
+            if self.pattern.is_match(symbol.as_bytes()) {
+                cache.insert(id);
+            }
+        }
+    }
+
+    fn on_append(&mut self, symbol_table: &SymbolTable, starting_id: usize) {
+        let mut cache = self.cache.borrow_mut();
+        let symbols = symbol_table.symbols_tail(starting_id);
+        for (i, symbol) in symbols.iter().enumerate() {
+            let id = starting_id + i;
+            if self.pattern.is_match(symbol.as_bytes()) {
+                cache.insert(id);
+            }
+        }
+    }
+}
+
 fn grep<R: IonDataSource, C: Cursor<R>>(
-    pattern: &Regex,
+    pattern: Regex,
     reader: &mut Reader<R, C>,
 ) -> IonResult<usize> {
     use IonType::*;
+
+    let symbol_match_cache = Rc::new(RefCell::new(HashSet::with_capacity(64)));
+    let symbol_pattern_matcher = SymbolPatternMatcher {
+        pattern: pattern.clone(),
+        cache: symbol_match_cache.clone(),
+    };
+
+    reader.symtab_event_handler(symbol_pattern_matcher);
+
     let mut count: usize = 0;
     loop {
         let ion_type = match reader.next()? {
@@ -74,21 +116,25 @@ fn grep<R: IonDataSource, C: Cursor<R>>(
             None => break,
         };
 
-        let field_name_matches = reader
-            .field_name()
-            .map(|s| pattern.is_match(s.as_bytes()))
-            .unwrap_or(false);
-        if field_name_matches {
-            count += 1;
-            reader.step_out()?;
-            continue;
+        let cache = symbol_match_cache.borrow();
+
+        if cache.len() > 0 {
+            let field_name_matches = reader
+                .field_id()
+                .map(|sid| cache.contains(&sid))
+                .unwrap_or(false);
+            if field_name_matches {
+                count += 1;
+                reader.step_out()?;
+                continue;
+            }
         }
         let mut item_matched = false;
         match ion_type {
             Struct | List | SExpression => reader.step_in()?,
             String => {
                 let matches = reader
-                    .string_bytes_map(|s| pattern.is_match(s))?
+                    .string_bytes_map(|buf| pattern.is_match(buf))?
                     .unwrap_or(false);
                 if matches {
                     count += 1;
@@ -96,15 +142,12 @@ fn grep<R: IonDataSource, C: Cursor<R>>(
                 }
             }
             Symbol => {
-                let sid = reader.read_symbol_id()?.unwrap();
-                let matches = reader
-                    .symbol_table()
-                    .text_for(sid)
-                    .map(|text| pattern.is_match(text.as_bytes()))
-                    .unwrap_or(false);
-                if matches {
-                    count += 1;
-                    item_matched = true;
+                if cache.len() > 0 {
+                    let sid = reader.read_symbol_id()?.unwrap();
+                    if cache.contains(&sid) {
+                        count += 1;
+                        item_matched = true;
+                    }
                 }
             }
             _ => {}

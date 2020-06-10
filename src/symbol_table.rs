@@ -1,6 +1,7 @@
+use std::collections::HashMap;
+
 use crate::constants::v1_0;
 use crate::types::SymbolId;
-use std::collections::HashMap;
 
 pub struct SymbolTable {
     symbols_by_id: Vec<String>,
@@ -51,7 +52,20 @@ impl SymbolTable {
         self.symbols_by_id.get(sid).map(|text| text.as_str())
     }
 
+    pub fn symbols(&self) -> &[String] {
+        &self.symbols_by_id
+    }
+
+    pub fn symbols_tail(&self, start: usize) -> &[String] {
+        &self.symbols_by_id[start..]
+    }
+
     pub fn len(&self) -> usize {
         self.symbols_by_id.len()
     }
+}
+
+pub trait SymbolTableEventHandler {
+    fn on_reset<'a>(&'a mut self, symbol_table: &'a SymbolTable);
+    fn on_append<'a>(&'a mut self, symbol_table: &'a SymbolTable, starting_id: usize);
 }

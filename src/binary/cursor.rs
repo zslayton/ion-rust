@@ -310,17 +310,15 @@ impl<R: IonDataSource> Cursor<R> for BinaryIonCursor<R> {
     }
 
     fn string_bytes_map<F, T>(&mut self, f: F) -> IonResult<Option<T>>
-        where
-            F: FnOnce(&[u8]) -> T,
+    where
+        F: FnOnce(&[u8]) -> T,
     {
         use std::str;
         read_safety_checks!(self, IonType::String);
 
         let length_in_bytes = self.cursor.value.length_in_bytes;
 
-        self.read_slice(length_in_bytes, |buffer: &[u8]| {
-            Ok(Some(f(buffer)))
-        })
+        self.read_slice(length_in_bytes, |buffer: &[u8]| Ok(Some(f(buffer))))
     }
 
     fn read_symbol_id(&mut self) -> IonResult<Option<SymbolId>> {

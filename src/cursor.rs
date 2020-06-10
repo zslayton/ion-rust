@@ -64,8 +64,8 @@ pub trait Cursor<D: IonDataSource> {
         F: FnOnce(&str) -> T;
 
     fn string_bytes_map<F, T>(&mut self, f: F) -> IonResult<Option<T>>
-        where
-            F: FnOnce(&[u8]) -> T;
+    where
+        F: FnOnce(&[u8]) -> T;
 
     /// If the current value is a symbol, returns its value as a SymbolId; otherwise, returns None.
     fn read_symbol_id(&mut self) -> IonResult<Option<SymbolId>>;

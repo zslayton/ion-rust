@@ -2,16 +2,18 @@ use crate::cursor::StreamItem::*;
 use crate::result::IonResult;
 use crate::symbol_table::SymbolTable;
 use crate::types::SymbolId;
-use crate::{Cursor, IonDataSource, IonType};
+use crate::{Cursor, IonDataSource, IonType, SymbolTableEventHandler};
 use bigdecimal::BigDecimal;
 use chrono::{DateTime, FixedOffset};
 use delegate::delegate;
+use std::boxed::Box;
 use std::marker::PhantomData;
 
 pub struct Reader<D: IonDataSource, C: Cursor<D>> {
     cursor: C,
     symbol_table: SymbolTable,
     spooky: PhantomData<D>,
+    symtab_event_handler: Option<Box<dyn SymbolTableEventHandler>>,
 }
 
 impl<D: IonDataSource, C: Cursor<D>> Reader<D, C> {
@@ -20,7 +22,15 @@ impl<D: IonDataSource, C: Cursor<D>> Reader<D, C> {
             cursor,
             symbol_table: SymbolTable::new(),
             spooky: PhantomData,
+            symtab_event_handler: None,
         }
+    }
+
+    pub fn symtab_event_handler<H>(&mut self, handler: H)
+    where
+        H: 'static + SymbolTableEventHandler,
+    {
+        self.symtab_event_handler = Some(Box::new(handler));
     }
 
     pub fn next(&mut self) -> IonResult<Option<(IonType, bool)>> {
@@ -53,6 +63,7 @@ impl<D: IonDataSource, C: Cursor<D>> Reader<D, C> {
                 .cursor
                 .field_id()
                 .expect("No field ID found inside $ion_symbol_table struct.");
+            // println!("field_id, ion_type, is_null => {}, {:?}, {}", field_id, ion_type, is_null);
             match (field_id, ion_type, is_null) {
                 (6, IonType::Symbol, false) => {
                     // imports
@@ -74,14 +85,38 @@ impl<D: IonDataSource, C: Cursor<D>> Reader<D, C> {
                     unimplemented!("No support for {:?}", something_else);
                 }
             }
-            if !is_append {
-                self.symbol_table.reset();
-                println!("Resetting symbol table.");
-            }
+        }
+
+        if !is_append {
+            self.symbol_table.reset();
             for new_symbol in new_symbols.drain(..) {
-                // print!("{}", new_symbol);
                 let _id = self.symbol_table.intern(new_symbol);
-                // println!(" (${})", id);
+            }
+            {
+                let Reader {
+                    symtab_event_handler,
+                    symbol_table,
+                    ..
+                } = self;
+                symtab_event_handler
+                    .as_mut()
+                    .map(|h| h.on_reset(symbol_table));
+            }
+        } else {
+            // println!("New symbols: {:?}", new_symbols);
+            let new_ids_start = self.symbol_table.len();
+            for new_symbol in new_symbols.drain(..) {
+                let _id = self.symbol_table.intern(new_symbol);
+            }
+            {
+                let Reader {
+                    symtab_event_handler,
+                    symbol_table,
+                    ..
+                } = self;
+                symtab_event_handler
+                    .as_mut()
+                    .map(|h| h.on_append(symbol_table, new_ids_start));
             }
         }
 
