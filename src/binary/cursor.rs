@@ -283,6 +283,46 @@ impl<R: IonDataSource> Cursor<R> for BinaryIonCursor<R> {
         self.string_ref_map(|s: &str| s.into())
     }
 
+    /// Runs the provided closure, passing in a reference to the string to be read and allowing a
+    /// calculated value of any type to be returned. When possible, string_ref_map will pass a
+    /// reference directly to the bytes in the input buffer rather than copying the string.
+    fn string_ref_map<F, T>(&mut self, f: F) -> IonResult<Option<T>>
+    where
+        F: FnOnce(&str) -> T,
+    {
+        use std::str;
+        read_safety_checks!(self, IonType::String);
+
+        let length_in_bytes = self.cursor.value.length_in_bytes;
+
+        self.read_slice(length_in_bytes, |buffer: &[u8]| {
+            let string_ref = match str::from_utf8(buffer) {
+                Ok(utf8_text) => utf8_text,
+                Err(utf8_error) => {
+                    return decoding_error(&format!(
+                        "The requested string was not valid UTF-8: {:?}",
+                        utf8_error
+                    ))
+                }
+            };
+            Ok(Some(f(string_ref)))
+        })
+    }
+
+    fn string_bytes_map<F, T>(&mut self, f: F) -> IonResult<Option<T>>
+        where
+            F: FnOnce(&[u8]) -> T,
+    {
+        use std::str;
+        read_safety_checks!(self, IonType::String);
+
+        let length_in_bytes = self.cursor.value.length_in_bytes;
+
+        self.read_slice(length_in_bytes, |buffer: &[u8]| {
+            Ok(Some(f(buffer)))
+        })
+    }
+
     fn read_symbol_id(&mut self) -> IonResult<Option<SymbolId>> {
         read_safety_checks!(self, IonType::Symbol);
 
@@ -397,6 +437,10 @@ impl<R: IonDataSource> Cursor<R> for BinaryIonCursor<R> {
         self.skip_bytes(bytes_to_skip)?;
         Ok(())
     }
+
+    fn depth(&self) -> usize {
+        self.cursor.depth
+    }
 }
 
 impl<R> BinaryIonCursor<R>
@@ -418,10 +462,6 @@ where
             },
             header_cache: create_header_byte_jump_table(),
         }
-    }
-
-    pub fn depth(&self) -> usize {
-        self.cursor.depth
     }
 
     pub fn is_null(&self) -> bool {
@@ -636,32 +676,6 @@ where
 
         let number_of_bytes = self.cursor.value.length_in_bytes;
         self.read_slice(number_of_bytes, |buffer: &[u8]| Ok(Some(f(buffer))))
-    }
-
-    /// Runs the provided closure, passing in a reference to the string to be read and allowing a
-    /// calculated value of any type to be returned. When possible, string_ref_map will pass a
-    /// reference directly to the bytes in the input buffer rather than copying the string.
-    pub fn string_ref_map<F, T>(&mut self, f: F) -> IonResult<Option<T>>
-    where
-        F: FnOnce(&str) -> T,
-    {
-        use std::str;
-        read_safety_checks!(self, IonType::String);
-
-        let length_in_bytes = self.cursor.value.length_in_bytes;
-
-        self.read_slice(length_in_bytes, |buffer: &[u8]| {
-            let string_ref = match str::from_utf8(buffer) {
-                Ok(utf8_text) => utf8_text,
-                Err(utf8_error) => {
-                    return decoding_error(&format!(
-                        "The requested string was not valid UTF-8: {:?}",
-                        utf8_error
-                    ))
-                }
-            };
-            Ok(Some(f(string_ref)))
-        })
     }
 }
 

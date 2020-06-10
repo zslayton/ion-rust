@@ -58,6 +58,15 @@ pub trait Cursor<D: IonDataSource> {
     /// If the current value is a string, returns its value as a String; otherwise, returns None.
     fn read_string(&mut self) -> IonResult<Option<String>>;
 
+    //TODO
+    fn string_ref_map<F, T>(&mut self, f: F) -> IonResult<Option<T>>
+    where
+        F: FnOnce(&str) -> T;
+
+    fn string_bytes_map<F, T>(&mut self, f: F) -> IonResult<Option<T>>
+        where
+            F: FnOnce(&[u8]) -> T;
+
     /// If the current value is a symbol, returns its value as a SymbolId; otherwise, returns None.
     fn read_symbol_id(&mut self) -> IonResult<Option<SymbolId>>;
 
@@ -80,6 +89,8 @@ pub trait Cursor<D: IonDataSource> {
     /// will position the cursor over the value that follows the container. If the cursor is not in
     /// a container (i.e. it is already at the top level), returns Err.
     fn step_out(&mut self) -> IonResult<()>;
+
+    fn depth(&self) -> usize;
 }
 
 #[derive(Debug, Eq, PartialEq)]

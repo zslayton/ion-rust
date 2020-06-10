@@ -10,7 +10,12 @@ pub mod cursor;
 pub mod data_source;
 pub mod types;
 
+mod constants;
+mod reader;
+mod symbol_table;
+
 pub use binary::cursor::BinaryIonCursor;
 pub use cursor::Cursor;
 pub use data_source::IonDataSource;
+pub use reader::Reader;
 pub use types::IonType;
