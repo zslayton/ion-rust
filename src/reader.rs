@@ -87,23 +87,7 @@ impl<D: IonDataSource, C: Cursor<D>> Reader<D, C> {
             }
         }
 
-        if !is_append {
-            self.symbol_table.reset();
-            for new_symbol in new_symbols.drain(..) {
-                let _id = self.symbol_table.intern(new_symbol);
-            }
-            {
-                let Reader {
-                    symtab_event_handler,
-                    symbol_table,
-                    ..
-                } = self;
-                symtab_event_handler
-                    .as_mut()
-                    .map(|h| h.on_reset(symbol_table));
-            }
-        } else {
-            // println!("New symbols: {:?}", new_symbols);
+        if is_append {
             let new_ids_start = self.symbol_table.len();
             for new_symbol in new_symbols.drain(..) {
                 let _id = self.symbol_table.intern(new_symbol);
@@ -117,6 +101,21 @@ impl<D: IonDataSource, C: Cursor<D>> Reader<D, C> {
                 symtab_event_handler
                     .as_mut()
                     .map(|h| h.on_append(symbol_table, new_ids_start));
+            }
+        } else {
+            self.symbol_table.reset();
+            for new_symbol in new_symbols.drain(..) {
+                let _id = self.symbol_table.intern(new_symbol);
+            }
+            {
+                let Reader {
+                    symtab_event_handler,
+                    symbol_table,
+                    ..
+                } = self;
+                symtab_event_handler
+                    .as_mut()
+                    .map(|h| h.on_reset(symbol_table));
             }
         }
 

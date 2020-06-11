@@ -120,6 +120,7 @@ impl<R: IonDataSource> Cursor<R> for BinaryIonCursor<R> {
         self.cursor.ion_version
     }
 
+    #[inline]
     fn next(&mut self) -> IonResult<Option<StreamItem>> {
         // Skip the remaining bytes of the current value, if any.
         let _ = self.skip_current_value()?;
@@ -321,6 +322,7 @@ impl<R: IonDataSource> Cursor<R> for BinaryIonCursor<R> {
         self.read_slice(length_in_bytes, |buffer: &[u8]| Ok(Some(f(buffer))))
     }
 
+    #[inline(always)]
     fn read_symbol_id(&mut self) -> IonResult<Option<SymbolId>> {
         read_safety_checks!(self, IonType::Symbol);
 
@@ -392,6 +394,7 @@ impl<R: IonDataSource> Cursor<R> for BinaryIonCursor<R> {
         Ok(Some(datetime))
     }
 
+    #[inline]
     fn step_in(&mut self) -> IonResult<()> {
         use self::IonType::*;
         self.cursor.is_in_struct = match self.cursor.value.ion_type {
@@ -406,6 +409,7 @@ impl<R: IonDataSource> Cursor<R> for BinaryIonCursor<R> {
         Ok(())
     }
 
+    #[inline]
     fn step_out(&mut self) -> IonResult<()> {
         use std::mem;
         let bytes_to_skip;
