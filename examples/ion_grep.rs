@@ -220,8 +220,6 @@ fn sneaky_grep_every_n<T: AsRef<[u8]>>(
         match ion_type {
             Struct | List | SExpression => reader.step_in()?,
             String => {
-                let depth = reader.depth();
-                let field_name = reader.field_name().map(|s| s.to_string());
                 let matches = reader
                     .string_bytes_map(|buf| pattern.is_match(buf))?
                     .unwrap_or(false);
