@@ -532,6 +532,7 @@ where
         Ok(())
     }
 
+    #[inline(always)]
     fn read_standard_length(&mut self) -> IonResult<usize> {
         let length = match self.cursor.value.header.length_code {
             length_codes::NULL => 0,
