@@ -20,6 +20,7 @@ use crate::{
     result::{decoding_error, illegal_operation, illegal_operation_raw, IonResult},
     types::{IonType, SymbolId},
 };
+use std::io;
 
 /// Information about the value over which the Cursor is currently positioned.
 #[derive(Clone, Debug)]
@@ -154,7 +155,7 @@ impl<R: IonDataSource> Cursor<R> for BinaryIonCursor<R> {
                 // This is actually the first byte in an Ion Version Marker
                 // TODO: actually parse the IVM instead of assuming 1.0 and skipping it
                 self.cursor.ion_version = (1, 0);
-                self.data_source.skip_bytes(IVM.len() - 1)?;
+                self.skip_bytes(IVM.len() - 1)?;
                 return Ok(Some(StreamItem::VersionMarker));
             }
             // We've found an annotated value. Read all of the annotation symbols leading
@@ -445,6 +446,31 @@ impl<R: IonDataSource> Cursor<R> for BinaryIonCursor<R> {
     }
 }
 
+impl<T> BinaryIonCursor<io::Cursor<T>>
+    where
+        T: AsRef<[u8]>,
+{
+    //TODO: Broaden to any type, probably?
+    pub fn raw_value_bytes(&self) -> Option<&[u8]> {
+        if self.ion_type().is_none() {
+            return None;
+        }
+        let bytes = self.data_source.get_ref().as_ref();
+        // let end = self.cursor.value.last_byte;
+        // let start = end - self.cursor.value.length_in_bytes + 1;
+        let start = self.cursor.bytes_read;
+        let end = start + self.cursor.value.length_in_bytes;
+        // println!("Start: {}", start);
+        // println!("Length: {}", self.cursor.value.length_in_bytes);
+        // println!("Last byte: {}", end);
+        Some(&bytes[start..end])
+        // 0x_4 A B C D
+        // 0    1 2 3 4
+        // end = 4
+        // start = end - length - 1
+    }
+}
+
 impl<R> BinaryIonCursor<R>
 where
     R: IonDataSource,
@@ -691,7 +717,7 @@ mod tests {
 
     use crate::binary::constants::v1_0::IVM;
     use crate::binary::cursor::BinaryIonCursor;
-    use crate::cursor::{Cursor, StreamItem::*};
+    use crate::cursor::{Cursor, StreamItem::*, StreamItem};
     use crate::result::IonResult;
     use crate::types::IonType;
 
@@ -989,7 +1015,7 @@ mod tests {
 
         // {$11: [1, 2, 3], $10: 1}
         let mut cursor = ion_cursor_for(&[
-            0xDB, // 9-byte struct
+            0xDB, // 11-byte struct
             0x8B, // Field ID 11
             0xB6, // 6-byte List
             0x21, 0x01, // Integer 1
@@ -1028,6 +1054,39 @@ mod tests {
         // End of the stream
         assert_eq!(cursor.next()?, None);
 
+        Ok(())
+    }
+
+    #[test]
+    fn test_raw_value_bytes() -> IonResult<()> {
+        // Note: technically invalid Ion because the symbol IDs referenced are never added to the
+        // symbol table.
+
+        // {$11: [1, 2, 3], $10: 1}
+        let ion_data = &[
+            0xDB, // 11-byte struct
+            0x8B, // Field ID 11
+            0xB6, // 6-byte List
+            0x21, 0x01, // Integer 1
+            0x21, 0x02, // Integer 2
+            0x21, 0x03, // Integer 3
+            0x8A, // Field ID 10
+            0x21, 0x01, // Integer 1
+        ];
+        let mut cursor = ion_cursor_for(ion_data);
+        assert_eq!(Some(StreamItem::Value(IonType::Struct, false)), cursor.next()?);
+        assert_eq!(cursor.raw_value_bytes(), Some(&ion_data[1..]));
+        cursor.step_in()?;
+        assert_eq!(Some(StreamItem::Value(IonType::List, false)), cursor.next()?);
+        assert_eq!(cursor.raw_value_bytes(), Some(&ion_data[3..9]));
+        cursor.step_in()?;
+        assert_eq!(Some(StreamItem::Value(IonType::Integer, false)), cursor.next()?);
+        assert_eq!(cursor.raw_value_bytes(), Some(&ion_data[4..=4]));
+        assert_eq!(Some(StreamItem::Value(IonType::Integer, false)), cursor.next()?);
+        assert_eq!(cursor.raw_value_bytes(), Some(&ion_data[6..=6]));
+        cursor.step_out()?;
+        assert_eq!(Some(StreamItem::Value(IonType::Integer, false)), cursor.next()?);
+        assert_eq!(cursor.raw_value_bytes(), Some(&ion_data[11..=11]));
         Ok(())
     }
 }

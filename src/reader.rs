@@ -2,12 +2,13 @@ use crate::cursor::StreamItem::*;
 use crate::result::IonResult;
 use crate::symbol_table::SymbolTable;
 use crate::types::SymbolId;
-use crate::{Cursor, IonDataSource, IonType, SymbolTableEventHandler};
+use crate::{Cursor, IonDataSource, IonType, SymbolTableEventHandler, BinaryIonCursor};
 use bigdecimal::BigDecimal;
 use chrono::{DateTime, FixedOffset};
 use delegate::delegate;
 use std::boxed::Box;
 use std::marker::PhantomData;
+use std::io;
 
 pub struct Reader<D: IonDataSource, C: Cursor<D>> {
     cursor: C,
@@ -158,5 +159,13 @@ impl<D: IonDataSource, C: Cursor<D>> Reader<D, C> {
             pub fn step_out(&mut self) -> IonResult<()>;
             pub fn depth(&self) -> usize;
         }
+    }
+}
+
+//TODO: Find an alias that makes this more obvious.
+impl<T: AsRef<[u8]>> Reader<io::Cursor<T>, BinaryIonCursor<io::Cursor<T>>> {
+    #[inline(always)]
+    pub fn raw_value_bytes(&self) -> Option<&[u8]> {
+        self.cursor.raw_value_bytes()
     }
 }
