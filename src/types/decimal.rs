@@ -7,6 +7,8 @@ use crate::result::IonError;
 use crate::types::coefficient::{Coefficient, Sign};
 use crate::types::magnitude::Magnitude;
 use std::convert::{TryFrom, TryInto};
+use serde::{Serialize, Serializer};
+use crate::serde::tunnel::Tunneled;
 
 /// An arbitrary-precision Decimal type with a distinct representation of negative zero (`-0`).
 #[derive(Clone, Debug)]
@@ -14,6 +16,22 @@ pub struct Decimal {
     // A Coefficient is a Sign/Magnitude pair supporting integers of arbitrary size
     pub(crate) coefficient: Coefficient,
     pub(crate) exponent: i64,
+}
+
+impl Serialize for Decimal {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+    {
+        let tunneled = Tunneled::Decimal(self);
+        let ptr_bytes = tunneled.serialize_ref();
+        println!("Decimal ptr bytes: {:?}", ptr_bytes);
+        let byte_slice = &ptr_bytes[..];
+        println!("Decimal byte_slice: {:?}", byte_slice.as_ptr());
+        // Send this byte array to the serialize_bytes method,
+        // which is normally for writing a byte array.
+        serializer.serialize_bytes(byte_slice)
+    }
 }
 
 impl Decimal {
@@ -191,6 +209,8 @@ mod decimal_tests {
     use bigdecimal::BigDecimal;
     use num_traits::ToPrimitive;
     use std::convert::TryInto;
+    use std::str::FromStr;
+    use std::cmp::Ordering;
 
     #[test]
     fn test_decimal_eq() {

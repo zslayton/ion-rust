@@ -24,6 +24,7 @@ pub mod value;
 
 pub mod constants;
 mod reader;
+mod serde;
 mod symbol_table;
 mod system_event_handler;
 

@@ -6,9 +6,11 @@ use crate::types::magnitude::Magnitude;
 use std::convert::TryFrom;
 use std::ops::{MulAssign, Neg};
 
+use serde::Serialize;
+
 /// Indicates whether the Coefficient's magnitude is less than 0 (negative) or not (positive).
 /// When the magnitude is zero, the Sign can be used to distinguish between -0 and 0.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize)]
 pub enum Sign {
     Negative,
     Positive,

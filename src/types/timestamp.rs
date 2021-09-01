@@ -1,7 +1,9 @@
 use crate::result::{illegal_operation, illegal_operation_raw, IonError, IonResult};
+use crate::serde::tunnel::Tunneled;
 use crate::types::decimal::Decimal;
 use chrono::{DateTime, Datelike, FixedOffset, NaiveDate, NaiveDateTime, TimeZone, Timelike};
 use ion_c_sys::timestamp::{IonDateTime, TSOffsetKind, TSPrecision};
+use serde::{Serialize, Serializer};
 use std::convert::TryInto;
 use std::fmt::Debug;
 
@@ -79,6 +81,20 @@ pub struct Timestamp {
     pub(crate) offset: Option<FixedOffset>,
     pub(crate) precision: Precision,
     pub(crate) fractional_seconds: Option<Mantissa>,
+}
+
+impl Serialize for Timestamp {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let tunneled = Tunneled::Timestamp(self);
+        let ptr_bytes = tunneled.serialize_ref();
+        println!("Timestamp ptr bytes: {:?}", ptr_bytes);
+        let byte_slice = &ptr_bytes[..];
+        println!("byte_slice: {:?}", byte_slice.as_ptr());
+        serializer.serialize_bytes(byte_slice)
+    }
 }
 
 // TODO: Timestamp does not yet provide useful accessors for its individual fields. It can be
