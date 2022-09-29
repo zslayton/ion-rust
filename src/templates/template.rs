@@ -41,9 +41,18 @@ impl Template {
             body
         })
     }
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+    pub fn parameters(&self) -> &Vec<Parameter> {
+        &self.parameters
+    }
+    pub fn body(&self) -> &Element {
+        &self.body
+    }
 }
 
-enum Encoding {
+pub enum Encoding {
     Any
 }
 
@@ -60,7 +69,7 @@ impl Encoding {
     }
 }
 
-enum Cardinality {
+pub enum Cardinality {
     Required,
     Optional,
     Many
@@ -81,7 +90,7 @@ impl Cardinality {
     }
 }
 
-struct Parameter {
+pub struct Parameter {
     name: String,
     encoding: Encoding,
     cardinality: Cardinality, // required, optional, many
@@ -114,5 +123,14 @@ impl Parameter {
             encoding,
             cardinality
         })
+    }
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+    pub fn encoding(&self) -> &Encoding {
+        &self.encoding
+    }
+    pub fn cardinality(&self) -> &Cardinality {
+        &self.cardinality
     }
 }
