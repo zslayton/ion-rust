@@ -1,7 +1,9 @@
 use crate::text::parse_result::IonParseResult;
 use nom::branch::alt;
+use nom::bytes::streaming::tag;
 use nom::sequence::pair;
 use nom::Parser;
+use crate::RawSymbolToken;
 
 use crate::text::parsers::annotations::parse_annotations;
 use crate::text::parsers::blob::parse_blob;
@@ -46,9 +48,18 @@ pub(crate) fn scalar(input: &str) -> IonParseResult<TextValue> {
 /// Matches an optional series of annotations and their associated TextValue.
 pub(crate) fn annotated_value(input: &str) -> IonParseResult<AnnotatedTextValue> {
     alt((
+        template_invocation_start,
         pair(parse_annotations, value).map(|(a, v)| v.with_annotations(a)),
         value.map(|v| v.without_annotations()),
     ))(input)
+}
+
+/// Matches a `(:`, treating it as equivalent to `$ion_invoke::(`
+pub(crate) fn template_invocation_start(input: &str) -> IonParseResult<AnnotatedTextValue> {
+    tag("(:").map(|_| {
+        let annotation: RawSymbolToken = RawSymbolToken::Text("ion_invoke".to_string());
+        AnnotatedTextValue::new(vec![annotation], TextValue::SExpressionStart)
+    }).parse(input)
 }
 
 /// Matches an optional series of annotations and their associated scalar TextValue.
@@ -62,7 +73,20 @@ pub(crate) fn annotated_scalar(input: &str) -> IonParseResult<AnnotatedTextValue
 /// Matches an optional series of annotations and their associated scalar TextValue.
 pub(crate) fn annotated_container_start(input: &str) -> IonParseResult<AnnotatedTextValue> {
     alt((
+        template_invocation_start,
         pair(parse_annotations, container_start).map(|(a, v)| v.with_annotations(a)),
         container_start.map(|v| v.without_annotations()),
     ))(input)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn template_start() {
+        let (remaining, annotated_value) = template_invocation_start("(:").unwrap();
+        assert_eq!(remaining, "");
+        assert_eq!(AnnotatedTextValue::new(vec!["ion_invoke".into()], TextValue::SExpressionStart), annotated_value)
+    }
 }

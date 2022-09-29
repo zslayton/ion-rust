@@ -21,6 +21,7 @@ mod symbol_ref;
 mod symbol_table;
 mod system_reader;
 mod writer;
+mod templates;
 
 pub use data_source::IonDataSource;
 pub use raw_symbol_token::RawSymbolToken;

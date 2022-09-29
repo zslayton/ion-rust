@@ -409,7 +409,7 @@ pub enum Value {
 #[derive(Debug, Clone)]
 pub struct Element {
     annotations: Vec<Symbol>,
-    value: Value,
+    pub(crate) value: Value,
 }
 
 impl Element {
