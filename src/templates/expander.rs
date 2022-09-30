@@ -1,12 +1,17 @@
 use std::collections::HashMap;
 use crate::{IonType, Symbol};
-use crate::templates::template::Template;
+use crate::templates::template::{Cardinality, Template};
 use crate::types::integer::IntAccess;
 use crate::value::{IonElement, IonSequence};
+use crate::value::native_reader::NativeElementReader;
 use crate::value::owned::{Element, Sequence, Struct, Value};
+use crate::value::reader::ElementReader;
+
+type Environment = HashMap<String, Vec<Element>>;
 
 struct Expander {
-    templates: HashMap<String, Template>
+    // Our list of template definitions
+    templates: HashMap<String, Template>,
 }
 
 impl Default for Expander {
@@ -16,6 +21,26 @@ impl Default for Expander {
 }
 
 impl Expander {
+    pub fn from_template_source(ion_data: &str) -> Self {
+        let mut expander = Self {
+            templates: HashMap::new()
+        };
+        for template_element in NativeElementReader
+            .read_all(ion_data.as_bytes())
+            .expect("invalid template source") {
+
+            let mut expanded_definition = expander.expand(&template_element);
+            if expanded_definition.len() != 1 {
+                panic!("template bodies must be exactly 1 expression, found {}", expanded_definition.len())
+            }
+            let expanded_definition = expanded_definition.pop().unwrap();
+            let template = Template::from_ion(&expanded_definition)
+                .unwrap();
+            expander.templates.insert(template.name().to_owned(), template);
+        }
+        expander
+    }
+
     pub fn with_templates<I: IntoIterator<Item=Template>>(templates: I) -> Self {
         let templates_map: HashMap<String, Template> = templates
             .into_iter()
@@ -62,6 +87,13 @@ impl Expander {
         Value::Struct(s).into()
     }
 
+    // Expansions come in two flavors: they can appear in the data stream
+    //    (:name arg1 arg2)
+    // and they can appear in template definitions:
+    //    (name arg1 arg2) // no leading ':' in the s-expression
+    // When they appear in the data stream, the arguments must be expanded during evaluation.
+    // Whey they appear in a template def, the arguments have already been expanded and doing so
+    // again would only be wasted work.
     fn expand_invocation(&self, input: &Element) -> Vec<Element> {
         let invocation: Vec<&Element> = input.as_sequence().unwrap().iter().collect();
         if invocation.is_empty() {
@@ -69,22 +101,23 @@ impl Expander {
         }
         // TODO: Other forms of template identifier (int, fully qualified)
         let name = invocation.get(0).unwrap().as_str().expect("template name was not text");
-        let values = &invocation[1..];
+        let arguments = &invocation[1..];
         match name {
             "empty" => vec![],
-            "quote" => self.quote(values),
-            // TODO: `unquote`?
-            "stream" => self.stream(values),
-            "repeat" => self.repeat(values),
-            "inline" => self.inline(values),
-            "if_empty" => self.if_empty(values),
-            "annotated" => self.annotated(values),
-            "string" => self.string(values),
-            "symbol" => self.symbol(values),
-            "list" => self.list(values),
-            "sexp" => self.sexp(values),
-            "struct" => self.make_struct(values), // `struct` is a keyword
-            unsupported => panic!("Unsupported template name: '{}'", unsupported)
+            "stream" => self.stream(arguments),
+            "repeat" => self.repeat(arguments),
+            "inline" => self.inline(arguments),
+            "if_empty" => self.if_empty(arguments),
+            "annotated" => self.annotated(arguments),
+            "string" => self.string(arguments),
+            "symbol" => self.symbol(arguments),
+            "list" => self.list(arguments),
+            "sexp" => self.sexp(arguments),
+            "struct" => self.make_struct(arguments), // `struct` is a keyword
+            "quote" => self.quote(arguments),
+            template_name => {
+                self.expand_template(template_name, arguments)
+            }
         }
     }
 
@@ -93,6 +126,8 @@ impl Expander {
         Vec::new()
     }
 
+    // TODO: This only has meaning inside a template definition body and shouldn't be available
+    //       anywhere else.
     // Return a copy of the elements without performing expansion
     fn quote(&self, values: &[&Element]) -> Vec<Element> {
         values.iter()
@@ -237,6 +272,139 @@ impl Expander {
             .collect();
         Sequence::new(elements)
     }
+
+    fn expand_template(&self, template_name: &str, values: &[&Element]) -> Vec<Element> {
+        let template = self.templates
+            .get(template_name)
+            .unwrap_or_else(|| panic!("reference to unknown template: {}", template_name));
+        let environment = self.bind_arguments(template, values);
+        let body = template.body();
+        self.expand_tdl_element(&environment, body)
+    }
+
+    // The template body has already been expanded, so any `(:name ...)`s have been replaced.
+    // This method expands Template Definition Language (TDL) expressions. It looks for symbols
+    // in value position and, if it finds them in the Environment,
+    // TODO: quote, unquote
+    fn expand_tdl_element(&self, environment: &Environment, element: &Element) -> Vec<Element> {
+        if element.is_null() {
+            return vec![element.to_owned()];
+        }
+        match element.ion_type() {
+            IonType::SExpression => self.expand_tdl_operation(environment, element),
+            IonType::List => self.expand_tdl_list(environment, element),
+            IonType::Struct => self.expand_tdl_struct(environment, element),
+            IonType::Symbol => self.expand_tdl_symbol(environment, element),
+            _ => vec![element.to_owned()]
+        }
+    }
+    fn expand_tdl_symbol(&self, environment: &Environment, element: &Element) -> Vec<Element> {
+        let variable_name = element.as_str().unwrap();
+        if let Some(stream) = environment.get(variable_name) {
+            stream.clone()
+        } else {
+            vec![element.to_owned()]
+        }
+    }
+
+    fn expand_tdl_operation(&self, environment: &Environment, element: &Element) -> Vec<Element> {
+        let child_elements: Vec<&Element> = element.as_sequence().unwrap().iter().collect();
+        if child_elements.is_empty() {
+            panic!("empty operation");
+        }
+        // TODO: Other forms of template identifier (int, fully qualified)
+        let name = child_elements[0].as_str().expect("template name was not text");
+        let arguments = &child_elements[1..];
+        match name {
+            "empty" => vec![],
+            "quote" => self.tdl_op_quote(environment, arguments),
+            // TODO: `unquote`?
+            "stream" => self.tdl_op_stream(environment, arguments),
+            "repeat" => self.tdl_op_repeat(environment, arguments),
+            "inline" => self.inline(arguments),
+            "if_empty" => self.if_empty(arguments),
+            "annotated" => self.annotated(arguments),
+            "string" => self.string(arguments),
+            "symbol" => self.symbol(arguments),
+            "list" => self.list(arguments),
+            "sexp" => self.sexp(arguments),
+            "struct" => self.make_struct(arguments), // `struct` is a keyword
+            template_name => self.expand_template(template_name, arguments)
+        }
+    }
+
+    fn expand_tdl_list(&self, environment: &Environment, element: &Element) -> Vec<Element> {
+        let child_elements: Vec<Element> = element.as_sequence()
+            .unwrap()
+            .iter()
+            .flat_map(|_e| self.expand_tdl_element(environment, element))
+            .collect();
+        // Make a Vec containing a new list with the expanded child elements
+        vec![Value::List(Sequence::new(child_elements)).into()]
+    }
+
+    fn expand_tdl_struct(&self, environment: &Environment, element: &Element) -> Vec<Element> {
+        let fields = element.as_struct()
+            .unwrap()
+            .fields()
+            .map(|(name, value)| (name, self.expand_tdl_element(environment, value)))
+            .flat_map(|(name, values)| values.into_iter().map(|v| (name.to_owned(), v)));
+        let new_struct = Struct::from_iter(fields);
+        vec![Value::Struct(new_struct).into()]
+    }
+
+    // Looks at the template's parameter list and validates/binds elements to the parameter names
+    fn bind_arguments(&self, template: &Template, values: &[&Element]) -> Environment {
+        let parameters = template.parameters();
+        let arguments = values.iter();
+        let mut scope = HashMap::new();
+        for (param, argument) in parameters.iter().zip(arguments) {
+            let expanded_argument = self.expand(argument);
+            match param.cardinality() {
+                Cardinality::Required => if expanded_argument.len() != 1 {
+                    panic!("Parameter {} is required (exactly 1), but found {}", param.name(), expanded_argument.len())
+                }
+                Cardinality::Optional => if expanded_argument.len() > 1 {
+                    panic!("Parameter {} is optional (0-1), but found {}", param.name(), expanded_argument.len())
+                }
+                Cardinality::Many => {}
+            }
+            scope.insert(param.name().to_owned(), expanded_argument);
+        }
+        scope
+    }
+
+    fn tdl_op_empty(&self, _environment: &Environment, _element: &Element) -> Vec<Element> {
+        Vec::new()
+    }
+
+    fn tdl_op_quote(&self, _environment: &Environment, arguments: &[&Element]) -> Vec<Element> {
+        arguments.iter().map(|e| (*e).to_owned()).collect()
+    }
+
+    fn tdl_op_stream(&self, environment: &Environment, arguments: &[&Element]) -> Vec<Element> {
+        arguments
+            .iter()
+            .flat_map(|e| self.expand_tdl_element(environment, e))
+            .collect()
+    }
+
+    fn tdl_op_repeat(&self, environment: &Environment, arguments: &[&Element]) -> Vec<Element> {
+        let count = arguments
+            .get(0)
+            .and_then(|c| c.as_i64())
+            .unwrap_or_else(|| panic!("`repeat` called without integer count"));
+        let elements: Vec<Element> = arguments
+            .get(1)
+            .map(|e| self.expand_tdl_element(environment, e))
+            .expect("`repeat` called without trailing arguments");
+
+        let mut output = Vec::new();
+        for _ in 0..count {
+            output.extend(elements.clone());
+        }
+        output
+    }
 }
 
 #[cfg(test)]
@@ -247,11 +415,142 @@ mod tests {
     use crate::value::owned::Element;
     use crate::value::reader::ElementReader;
 
+    fn template_test(template_ion: &str, input_ion: &str, expected_ion: &str) {
+        let expander = Expander::from_template_source(template_ion);
+        expansion_test(expander, input_ion, expected_ion);
+    }
+
+    #[test]
+    fn test1() {
+        template_test(
+            r#"
+            {
+                name: foo,
+                parameters: [
+                    {name: x, encoding: any, cardinality: required},
+                    {name: y, encoding: any, cardinality: required},
+                    {name: z, encoding: any, cardinality: required},
+                ],
+                body: {foo: x, bar: y, baz: z}
+            }
+            "#,
+            r#"
+            (:foo Todd Tyler Zack)
+            (:foo cat dog mouse)
+            (:foo Curly Larry Moe)
+            "#,
+            r#"
+            {foo: Todd, bar: Tyler, baz: Zack}
+            {foo: cat, bar: dog, baz: mouse}
+            {foo: Curly, bar: Larry, baz: Moe}
+            "#
+        );
+    }
+
+    #[test]
+    fn test2() {
+        template_test(
+            r#"
+            {
+                name: foo,
+                parameters: [],
+                body: (stream (repeat 5 (quote hello)))
+            }
+            "#,
+            "(:foo)",
+            "hello hello hello hello hello"
+        );
+    }
+
+    #[test]
+    fn test3() {
+        template_test(
+            r#"
+            {
+                name: foo,
+                parameters: [],
+                body: (quote (repeat 5 (stream hello)))
+            }
+            "#,
+            "(:foo)",
+            "(repeat 5 (stream hello))"
+        );
+    }
+
+    #[test]
+    fn test4() {
+        template_test(
+            r#"
+            {
+                name: param,
+                parameters: [
+                    {name: cardinality, encoding: any, cardinality: required},
+                    {name: encoding, encoding: any, cardinality: required},
+                    {name: name, encoding: any, cardinality: required},
+                ],
+                body: {
+                    name: name,
+                    cardinality: cardinality,
+                    encoding: encoding
+                }
+            }
+            {
+                name: define,
+                parameters: [
+                    (:param required any name),
+                    (:param required any parameters),
+                    (:param required any body),
+                ],
+                body: {
+                   name: name,
+                   parameters: parameters,
+                   body: body,
+                }
+            }
+            (:define xyz_struct
+                (
+                    (:param required any x)
+                    (:param required any y)
+                    (:param required any z))
+                {
+                    x: x,
+                    y: y,
+                    z: z,
+                })
+            "#,
+            "(:xyz_struct 1 2 3)",
+            "{x: 1, y: 2, z: 3}"
+        );
+    }
+
+    fn template_expansion_test(expander: Expander,
+                              input_ion: &str,
+                              expected_ion: &str) {
+        let reader = NativeElementReader;
+        let input_elements = reader.read_all(input_ion.as_bytes()).expect("Invalid input Ion");
+        let expected_elements = reader.read_all(expected_ion.as_bytes()).expect("Invalid expected Ion");
+        let mut output_elements = vec![];
+        for input_element in &input_elements {
+            let expanded = expander.expand(&input_element);
+            output_elements.extend(expanded);
+        }
+        if output_elements != expected_elements {
+            println!("Expanded output did not match expected output.");
+            println!("=== Actual ===");
+            show_ion(&output_elements);
+            println!("=== Expected ===");
+            show_ion(&expected_elements);
+        }
+        assert_eq!(output_elements, expected_elements);
+    }
+
     fn operator_test(input_ion: &str, expected_ion: &str) {
         expansion_test(Default::default(), input_ion, expected_ion)
     }
 
-    fn expansion_test(expander: Expander, input_ion: &str, expected_ion: &str) {
+    fn expansion_test(expander: Expander,
+                      input_ion: &str,
+                      expected_ion: &str) {
         let reader = NativeElementReader;
         let input_elements = reader.read_all(input_ion.as_bytes()).expect("Invalid input Ion");
         let expected_elements = reader.read_all(expected_ion.as_bytes()).expect("Invalid expected Ion");
@@ -341,13 +640,3 @@ mod tests {
         operator_test("(:struct foo bar {baz: quux, quuz: gary})", "{foo: bar, baz: quux, quuz: gary}");
     }
 }
-
-/*
-NOTES
-- Treating invocations as $ion_invoke::() means we can represent them using a lot of existing
-  structures. Not great, but the devil we know.
-- Using {# } syntax means we have to add parsing machinery in more places. As an alternative,
-  we could use (: ) syntax, which is pretty nice.
-- What's the text repr for an invocation-that-makes-an-annotation? (:foo)::bar::baz? Is that a problem?
-  Should we just replace this with a system template for (:annotated)? What about field names?
- */

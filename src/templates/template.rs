@@ -4,13 +4,13 @@ use crate::value::{IonElement, IonSequence, IonStruct};
 use crate::value::owned::Element;
 
 pub struct Template {
-    name: String,
-    parameters: Vec<Parameter>,
-    body: Element,
+    pub(crate) name: String,
+    pub(crate) parameters: Vec<Parameter>,
+    pub(crate) body: Element,
 }
 
 impl Template {
-    fn from_ion(element: &Element) -> IonResult<Template> {
+    pub(crate) fn from_ion(element: &Element) -> IonResult<Template> {
         let template_struct = element
             .as_struct()
             .ok_or_else(|| decoding_error_raw("template definition must be an Ion struct"))?;
@@ -34,7 +34,6 @@ impl Template {
             .ok_or_else(|| decoding_error_raw("template definition must have a 'body' expression"))?
             .to_owned();
 
-        // let parameters: Vec<Parameter> =
         Ok(Template {
             name,
             parameters,
@@ -44,9 +43,13 @@ impl Template {
     pub fn name(&self) -> &str {
         &self.name
     }
-    pub fn parameters(&self) -> &Vec<Parameter> {
-        &self.parameters
+    pub fn parameters(&self) -> &[Parameter] {
+        self.parameters.as_slice()
     }
+    pub fn get_parameter<A: AsRef<str>>(&self, name: A) -> Option<&Parameter> {
+        self.parameters.iter().find(|p| p.name() == name.as_ref())
+    }
+
     pub fn body(&self) -> &Element {
         &self.body
     }
@@ -93,7 +96,7 @@ impl Cardinality {
 pub struct Parameter {
     name: String,
     encoding: Encoding,
-    cardinality: Cardinality, // required, optional, many
+    cardinality: Cardinality,
 }
 
 impl Parameter {
