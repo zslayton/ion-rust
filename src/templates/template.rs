@@ -57,8 +57,10 @@ impl Template {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Encoding {
     Any,
+    Template(String), // TODO: other kinds of template refs
 }
 
 impl Encoding {
@@ -68,12 +70,16 @@ impl Encoding {
             .ok_or_else(|| decoding_error_raw("encoding must be a symbol"))?;
         let encoding = match text {
             "any" => Encoding::Any,
+            template_name if element.has_annotation("template") => {
+                Encoding::Template(template_name.to_owned())
+            }
             _ => return decoding_error("unrecognized encoding"),
         };
         Ok(encoding)
     }
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum Cardinality {
     Required,
     Optional,
@@ -103,9 +109,12 @@ pub struct Parameter {
 
 impl Parameter {
     fn from_ion(element: &Element) -> IonResult<Parameter> {
-        let parameter_struct = element
-            .as_struct()
-            .ok_or_else(|| decoding_error_raw("parameter definition must be an Ion struct"))?;
+        let parameter_struct = element.as_struct().ok_or_else(|| {
+            decoding_error_raw(format!(
+                "parameter definition must be an Ion struct, found: {}",
+                element
+            ))
+        })?;
 
         let name = parameter_struct
             .get("name")
@@ -137,7 +146,7 @@ impl Parameter {
     pub fn encoding(&self) -> &Encoding {
         &self.encoding
     }
-    pub fn cardinality(&self) -> &Cardinality {
-        &self.cardinality
+    pub fn cardinality(&self) -> Cardinality {
+        self.cardinality
     }
 }

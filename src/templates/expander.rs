@@ -1,4 +1,4 @@
-use crate::templates::template::{Cardinality, Template};
+use crate::templates::template::{Cardinality, Encoding, Parameter, Template};
 use crate::types::integer::IntAccess;
 use crate::value::native_reader::NativeElementReader;
 use crate::value::owned::{Element, Sequence, Struct, Value};
@@ -372,33 +372,112 @@ impl Expander {
         let parameters = template.parameters();
         let arguments = values.iter();
         let mut scope = HashMap::new();
-        // TODO: Bind unspecified trailing arguments to `(:empty)`?
-        for (param, argument) in parameters.iter().zip(arguments) {
-            let expanded_argument = self.expand(argument);
-            match param.cardinality() {
-                Cardinality::Required => {
-                    if expanded_argument.len() != 1 {
-                        panic!(
-                            "Parameter '{}' is required (exactly 1), but found {}",
-                            param.name(),
-                            expanded_argument.len()
-                        )
-                    }
+
+        for (param, argument_expr) in parameters.iter().zip(arguments) {
+            self.bind_argument(&mut scope, template, param, argument_expr);
+        }
+
+        if values.len() > parameters.len() {
+            // There are trailing arguments that have not yet been bound to a parameter name
+            let last_parameter = parameters.last().unwrap_or_else(|| {
+                panic!(
+                    "found arguments in invocation of template '{}', which takes no parameters",
+                    template.name()
+                )
+            });
+
+            if last_parameter.cardinality() == Cardinality::Many {
+                // We can assume all remaining arguments belong to the trailing `many` parameter
+                for argument_expr in &values[parameters.len()..] {
+                    self.bind_argument(&mut scope, template, last_parameter, argument_expr);
                 }
-                Cardinality::Optional => {
-                    if expanded_argument.len() > 1 {
-                        panic!(
-                            "Parameter '{}' is optional (0-1), but found {}",
-                            param.name(),
-                            expanded_argument.len()
-                        )
-                    }
-                }
-                Cardinality::Many => {}
+            } else {
+                panic!(
+                    "found unbound arguments in invocation of template '{}'",
+                    template.name()
+                );
             }
+        }
+
+        // TODO: Bind unspecified trailing variadic arguments to `(:empty)`
+
+        scope
+    }
+
+    fn bind_argument(
+        &self,
+        scope: &mut HashMap<String, Vec<Element>>,
+        template: &Template,
+        param: &Parameter,
+        argument_expr: &Element,
+    ) {
+        // If the parameter's encoding is a template, we look for an s-expression representing
+        // its arguments. The template name is implied.
+        let expanded_argument = if let Encoding::Template(template_name) = param.encoding() {
+            if argument_expr.ion_type() != IonType::SExpression {
+                panic!(
+                    "Template '{}' param '{}' has encoding template::{} but argument was: {}",
+                    template.name(),
+                    param.name(),
+                    template_name,
+                    argument_expr
+                )
+            }
+            if argument_expr.has_annotation("$ion_invoke") {
+                panic!(
+                    "Template invocations can only be passed as an argument if the parameter encoding is `any`"
+                )
+            }
+            let template_arguments = Self::sequence_elements(argument_expr);
+            self.expand_template(template_name.as_ref(), template_arguments.as_slice())
+        } else {
+            self.expand(argument_expr)
+        };
+
+        match param.cardinality() {
+            Cardinality::Required => {
+                if expanded_argument.len() != 1 {
+                    panic!(
+                        "parameter '{}' is required (exactly 1), but found {}",
+                        param.name(),
+                        expanded_argument.len()
+                    )
+                }
+            }
+            Cardinality::Optional => {
+                if expanded_argument.len() > 1 {
+                    panic!(
+                        "parameter '{}' is optional (0-1), but found {}",
+                        param.name(),
+                        expanded_argument.len()
+                    )
+                }
+            }
+            Cardinality::Many => {}
+        }
+
+        if let Some(values) = scope.get_mut(param.name()) {
+            values.extend(expanded_argument);
+        } else {
             scope.insert(param.name().to_owned(), expanded_argument);
         }
-        scope
+    }
+
+    fn sequence_elements(sequence_element: &Element) -> Vec<&Element> {
+        sequence_element
+            .as_sequence()
+            .expect("tried to get sequence children for a non-sequence element")
+            .iter()
+            .collect()
+    }
+
+    fn sequence_elements_cloned(sequence_element: &Element) -> Vec<Element> {
+        sequence_element
+            .as_sequence()
+            .expect("tried to get sequence children for a non-sequence element")
+            .iter()
+            .map(|child| child.to_owned())
+            .collect()
     }
 
     fn tdl_op_empty(&self, _environment: &Environment, _element: &Element) -> Vec<Element> {
@@ -674,10 +753,17 @@ mod tests {
                 }
             }
             {
+                name: params,
+                parameters: [
+                    (:param many template::param parameter_stream)
+                ],
+                body: (sexp parameter_stream) // Wraps parameter structs in an s-expression
+            }
+            {
                 name: define,
                 parameters: [
                     (:param required any name),
-                    (:param required any parameters),
+                    (:param required template::params parameters),
                     (:param required any body),
                 ],
                 body: {
@@ -687,10 +773,10 @@ mod tests {
                 }
             }
             (:define xyz_struct
-                (
-                    (:param required any x)
-                    (:param required any y)
-                    (:param required any z))
+                (                     // Implicitly `:params`
+                    (required any x)  // Implicitly `:param`
+                    (required any y)  // Implicitly `:param`
+                    (required any z)) // Implicitly `:param`
                 {
                     x: x,
                     y: y,
@@ -748,7 +834,9 @@ mod tests {
                 body: [(each x sequence {value: x})]
             }
             "#,
-            "(:object_list (:stream 1 2 3 4 5 6))",
+            r#"
+                (:object_list (:stream 1 2 3 4 5 6))
+            "#,
             r#"
             [
                 {value: 1},
