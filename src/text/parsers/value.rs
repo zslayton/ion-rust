@@ -57,7 +57,7 @@ pub(crate) fn annotated_value(input: &str) -> IonParseResult<AnnotatedTextValue>
 /// Matches a `(:`, treating it as equivalent to `$ion_invoke::(`
 pub(crate) fn template_invocation_start(input: &str) -> IonParseResult<AnnotatedTextValue> {
     tag("(:").map(|_| {
-        let annotation: RawSymbolToken = RawSymbolToken::Text("ion_invoke".to_string());
+        let annotation: RawSymbolToken = RawSymbolToken::Text("$ion_invoke".to_string());
         AnnotatedTextValue::new(vec![annotation], TextValue::SExpressionStart)
     }).parse(input)
 }
@@ -87,6 +87,6 @@ mod tests {
     fn template_start() {
         let (remaining, annotated_value) = template_invocation_start("(:").unwrap();
         assert_eq!(remaining, "");
-        assert_eq!(AnnotatedTextValue::new(vec!["ion_invoke".into()], TextValue::SExpressionStart), annotated_value)
+        assert_eq!(AnnotatedTextValue::new(vec!["$ion_invoke".into()], TextValue::SExpressionStart), annotated_value)
     }
 }
