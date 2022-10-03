@@ -1,7 +1,7 @@
-use crate::IonResult;
 use crate::result::{decoding_error, decoding_error_raw};
-use crate::value::{IonElement, IonSequence, IonStruct};
 use crate::value::owned::Element;
+use crate::value::{IonElement, IonSequence, IonStruct};
+use crate::IonResult;
 
 pub struct Template {
     pub(crate) name: String,
@@ -24,7 +24,9 @@ impl Template {
         let parameters = template_struct
             .get("parameters")
             .and_then(|parameters| parameters.as_sequence())
-            .ok_or_else(|| decoding_error_raw("template definition must have a 'parameters' sequence"))?
+            .ok_or_else(|| {
+                decoding_error_raw("template definition must have a 'parameters' sequence")
+            })?
             .iter()
             .map(Parameter::from_ion)
             .collect::<IonResult<Vec<Parameter>>>()?;
@@ -37,7 +39,7 @@ impl Template {
         Ok(Template {
             name,
             parameters,
-            body
+            body,
         })
     }
     pub fn name(&self) -> &str {
@@ -56,7 +58,7 @@ impl Template {
 }
 
 pub enum Encoding {
-    Any
+    Any,
 }
 
 impl Encoding {
@@ -66,7 +68,7 @@ impl Encoding {
             .ok_or_else(|| decoding_error_raw("encoding must be a symbol"))?;
         let encoding = match text {
             "any" => Encoding::Any,
-            _ => return decoding_error("unrecognized encoding")
+            _ => return decoding_error("unrecognized encoding"),
         };
         Ok(encoding)
     }
@@ -75,7 +77,7 @@ impl Encoding {
 pub enum Cardinality {
     Required,
     Optional,
-    Many
+    Many,
 }
 
 impl Cardinality {
@@ -87,7 +89,7 @@ impl Cardinality {
             "required" => Cardinality::Required,
             "optional" => Cardinality::Optional,
             "many" => Cardinality::Many,
-            _ => return decoding_error("cardinality must be required, optional, or many")
+            _ => return decoding_error("cardinality must be required, optional, or many"),
         };
         Ok(cardinality)
     }
@@ -108,23 +110,25 @@ impl Parameter {
         let name = parameter_struct
             .get("name")
             .and_then(|name| name.as_str())
-            .ok_or_else(|| decoding_error_raw("parameter definition must have a text 'name' field"))?
+            .ok_or_else(|| {
+                decoding_error_raw("parameter definition must have a text 'name' field")
+            })?
             .to_owned();
 
-        let encoding = parameter_struct
-            .get("encoding")
-            .ok_or_else(|| decoding_error_raw("parameter definition must have an 'encoding' field"))?;
+        let encoding = parameter_struct.get("encoding").ok_or_else(|| {
+            decoding_error_raw("parameter definition must have an 'encoding' field")
+        })?;
         let encoding = Encoding::from_ion(encoding)?;
 
-        let cardinality = parameter_struct
-            .get("cardinality")
-            .ok_or_else(|| decoding_error_raw("parameter definition must have a 'cardinality' field"))?;
+        let cardinality = parameter_struct.get("cardinality").ok_or_else(|| {
+            decoding_error_raw("parameter definition must have a 'cardinality' field")
+        })?;
         let cardinality = Cardinality::from_ion(cardinality)?;
 
         Ok(Parameter {
             name,
             encoding,
-            cardinality
+            cardinality,
         })
     }
     pub fn name(&self) -> &str {

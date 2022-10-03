@@ -1,11 +1,11 @@
-use std::collections::HashMap;
-use crate::{IonType, Symbol};
 use crate::templates::template::{Cardinality, Template};
 use crate::types::integer::IntAccess;
-use crate::value::{IonElement, IonSequence};
 use crate::value::native_reader::NativeElementReader;
 use crate::value::owned::{Element, Sequence, Struct, Value};
 use crate::value::reader::ElementReader;
+use crate::value::{IonElement, IonSequence};
+use crate::{IonType, Symbol};
+use std::collections::HashMap;
 
 type Environment = HashMap<String, Vec<Element>>;
 
@@ -23,37 +23,43 @@ impl Default for Expander {
 impl Expander {
     pub fn from_template_source(ion_data: &str) -> Self {
         let mut expander = Self {
-            templates: HashMap::new()
+            templates: HashMap::new(),
         };
         for template_element in NativeElementReader
             .read_all(ion_data.as_bytes())
-            .expect("invalid template source") {
-
+            .expect("invalid template source")
+        {
             let mut expanded_definition = expander.expand(&template_element);
             if expanded_definition.len() != 1 {
-                panic!("template bodies must be exactly 1 expression, found {}", expanded_definition.len())
+                panic!(
+                    "template bodies must be exactly 1 expression, found {}",
+                    expanded_definition.len()
+                )
             }
             let expanded_definition = expanded_definition.pop().unwrap();
-            let template = Template::from_ion(&expanded_definition)
-                .unwrap();
-            expander.templates.insert(template.name().to_owned(), template);
+            let template = Template::from_ion(&expanded_definition).unwrap();
+            expander
+                .templates
+                .insert(template.name().to_owned(), template);
         }
         expander
     }
 
-    pub fn with_templates<I: IntoIterator<Item=Template>>(templates: I) -> Self {
+    pub fn with_templates<I: IntoIterator<Item = Template>>(templates: I) -> Self {
         let templates_map: HashMap<String, Template> = templates
             .into_iter()
             .map(|t| (t.name().to_owned(), t))
             .collect();
         Self {
-            templates: templates_map
+            templates: templates_map,
         }
     }
 
     pub fn expand(&self, input: &Element) -> Vec<Element> {
         match input.ion_type() {
-            IonType::SExpression if input.has_annotation("$ion_invoke") => self.expand_invocation(input),
+            IonType::SExpression if input.has_annotation("$ion_invoke") => {
+                self.expand_invocation(input)
+            }
             IonType::List => {
                 let expanded_elements = self.expand_sequence_elements(input);
                 vec![Value::List(Sequence::new(expanded_elements)).into()]
@@ -61,9 +67,9 @@ impl Expander {
             IonType::SExpression => {
                 let expanded_elements = self.expand_sequence_elements(input);
                 vec![Value::SExpression(Sequence::new(expanded_elements)).into()]
-            },
+            }
             IonType::Struct => vec![self.expand_struct_fields(input)],
-            _ => vec![input.clone()]
+            _ => vec![input.clone()],
         }
     }
 
@@ -100,7 +106,11 @@ impl Expander {
             panic!("empty template invocation");
         }
         // TODO: Other forms of template identifier (int, fully qualified)
-        let name = invocation.get(0).unwrap().as_str().expect("template name was not text");
+        let name = invocation
+            .get(0)
+            .unwrap()
+            .as_str()
+            .expect("template name was not text");
         let arguments = &invocation[1..];
         match name {
             "empty" => vec![],
@@ -115,9 +125,7 @@ impl Expander {
             "sexp" => self.sexp(arguments),
             "struct" => self.make_struct(arguments), // `struct` is a keyword
             "quote" => self.quote(arguments),
-            template_name => {
-                self.expand_template(template_name, arguments)
-            }
+            template_name => self.expand_template(template_name, arguments),
         }
     }
 
@@ -130,16 +138,12 @@ impl Expander {
     //       anywhere else.
     // Return a copy of the elements without performing expansion
     fn quote(&self, values: &[&Element]) -> Vec<Element> {
-        values.iter()
-            .map(|e| (*e).to_owned())
-            .collect()
+        values.iter().map(|e| (*e).to_owned()).collect()
     }
 
     // Return a copy of the elements after performing expansion
     fn stream(&self, values: &[&Element]) -> Vec<Element> {
-        values.iter()
-            .flat_map(|e| self.expand(e))
-            .collect()
+        values.iter().flat_map(|e| self.expand(e)).collect()
     }
 
     fn inline(&self, values: &[&Element]) -> Vec<Element> {
@@ -168,10 +172,8 @@ impl Expander {
             panic!("`repeat` count cannot be negative");
         }
         let mut expanded = Vec::new();
-        let values_to_repeat: Vec<Element> = values[1..]
-            .iter()
-            .flat_map(|e| self.expand(e))
-            .collect();
+        let values_to_repeat: Vec<Element> =
+            values[1..].iter().flat_map(|e| self.expand(e)).collect();
         for _ in 0..count {
             expanded.extend(values_to_repeat.iter().cloned());
         }
@@ -195,7 +197,8 @@ impl Expander {
         if values.len() != 2 {
             panic!("(:annotated) takes two expressions, found {}", values.len());
         }
-        let annotations: Vec<Symbol> = self.expand(values[0])
+        let annotations: Vec<Symbol> = self
+            .expand(values[0])
             .iter()
             .map(|e| Symbol::owned(e.as_str().expect("found non-text annotation")))
             .collect();
@@ -215,7 +218,10 @@ impl Expander {
 
     fn symbol(&self, values: &[&Element]) -> Vec<Element> {
         let new_string = self.join_text_elements(values);
-        vec![Element::new(Vec::new(), Value::Symbol(Symbol::owned(new_string)))]
+        vec![Element::new(
+            Vec::new(),
+            Value::Symbol(Symbol::owned(new_string)),
+        )]
     }
 
     fn join_text_elements(&self, values: &[&Element]) -> String {
@@ -224,7 +230,8 @@ impl Expander {
             .iter()
             .flat_map(|e| self.expand(e))
             .fold(&mut new_string, |new_string, element| {
-                let text = element.as_str()
+                let text = element
+                    .as_str()
                     .expect("`string` only accepts text types (string, symbol)");
                 new_string.push_str(text);
                 new_string
@@ -242,9 +249,7 @@ impl Expander {
 
     // `struct` is a keyword and cannot be a function name
     fn make_struct(&self, values: &[&Element]) -> Vec<Element> {
-        let elements: Vec<Element> = values.iter()
-            .flat_map(|e| self.expand(e))
-            .collect();
+        let elements: Vec<Element> = values.iter().flat_map(|e| self.expand(e)).collect();
 
         let mut new_fields: Vec<(Symbol, Element)> = Vec::new();
         let mut index: usize = 0;
@@ -258,8 +263,13 @@ impl Expander {
             } else {
                 // It's not a struct, so it must be a text value
                 index += 1;
-                let value = elements.get(index).expect("Found `struct` field name with no corresponding value.");
-                new_fields.push((Symbol::owned(field_name_element.as_str().unwrap()), value.to_owned()))
+                let value = elements
+                    .get(index)
+                    .expect("Found `struct` field name with no corresponding value.");
+                new_fields.push((
+                    Symbol::owned(field_name_element.as_str().unwrap()),
+                    value.to_owned(),
+                ))
             }
             index += 1;
         }
@@ -267,14 +277,13 @@ impl Expander {
     }
 
     fn join_into_sequence(&self, values: &[&Element]) -> Sequence {
-        let elements: Vec<Element> = values.iter()
-            .flat_map(|e| self.expand(e))
-            .collect();
+        let elements: Vec<Element> = values.iter().flat_map(|e| self.expand(e)).collect();
         Sequence::new(elements)
     }
 
     fn expand_template(&self, template_name: &str, values: &[&Element]) -> Vec<Element> {
-        let template = self.templates
+        let template = self
+            .templates
             .get(template_name)
             .unwrap_or_else(|| panic!("reference to unknown template: {}", template_name));
         let environment = self.bind_arguments(template, values);
@@ -295,7 +304,7 @@ impl Expander {
             IonType::List => self.expand_tdl_list(environment, element),
             IonType::Struct => self.expand_tdl_struct(environment, element),
             IonType::Symbol => self.expand_tdl_symbol(environment, element),
-            _ => vec![element.to_owned()]
+            _ => vec![element.to_owned()],
         }
     }
     fn expand_tdl_symbol(&self, environment: &Environment, element: &Element) -> Vec<Element> {
@@ -313,7 +322,9 @@ impl Expander {
             panic!("empty operation");
         }
         // TODO: Other forms of template identifier (int, fully qualified)
-        let name = child_elements[0].as_str().expect("template name was not text");
+        let name = child_elements[0]
+            .as_str()
+            .expect("template name was not text");
         let arguments = &child_elements[1..];
         match name {
             "empty" => vec![],
@@ -335,7 +346,8 @@ impl Expander {
     }
 
     fn expand_tdl_list(&self, environment: &Environment, element: &Element) -> Vec<Element> {
-        let child_elements: Vec<Element> = element.as_sequence()
+        let child_elements: Vec<Element> = element
+            .as_sequence()
             .unwrap()
             .iter()
             .flat_map(|e| self.expand_tdl_element(environment, e))
@@ -345,7 +357,8 @@ impl Expander {
     }
 
     fn expand_tdl_struct(&self, environment: &Environment, element: &Element) -> Vec<Element> {
-        let fields = element.as_struct()
+        let fields = element
+            .as_struct()
             .unwrap()
             .fields()
             .map(|(name, value)| (name, self.expand_tdl_element(environment, value)))
@@ -363,11 +376,23 @@ impl Expander {
         for (param, argument) in parameters.iter().zip(arguments) {
             let expanded_argument = self.expand(argument);
             match param.cardinality() {
-                Cardinality::Required => if expanded_argument.len() != 1 {
-                    panic!("Parameter '{}' is required (exactly 1), but found {}", param.name(), expanded_argument.len())
+                Cardinality::Required => {
+                    if expanded_argument.len() != 1 {
+                        panic!(
+                            "Parameter '{}' is required (exactly 1), but found {}",
+                            param.name(),
+                            expanded_argument.len()
+                        )
+                    }
                 }
-                Cardinality::Optional => if expanded_argument.len() > 1 {
-                    panic!("Parameter '{}' is optional (0-1), but found {}", param.name(), expanded_argument.len())
+                Cardinality::Optional => {
+                    if expanded_argument.len() > 1 {
+                        panic!(
+                            "Parameter '{}' is optional (0-1), but found {}",
+                            param.name(),
+                            expanded_argument.len()
+                        )
+                    }
                 }
                 Cardinality::Many => {}
             }
@@ -399,7 +424,11 @@ impl Expander {
 
         expanded_arguments
             .iter()
-            .flat_map(|e| e.as_sequence().expect("`inline` arguments must be sequences").iter())
+            .flat_map(|e| {
+                e.as_sequence()
+                    .expect("`inline` arguments must be sequences")
+                    .iter()
+            })
             .map(|e| e.to_owned())
             .collect()
     }
@@ -469,7 +498,8 @@ impl Expander {
         if arguments.len() != 2 {
             panic!("USAGE: (:annotated [...annotation expressions] value)");
         }
-        let annotations: Vec<Symbol> = self.expand_tdl_element(environment, arguments[0])
+        let annotations: Vec<Symbol> = self
+            .expand_tdl_element(environment, arguments[0])
             .iter()
             .map(|e| Symbol::owned(e.as_str().expect("found non-text annotation")))
             .collect();
@@ -505,7 +535,8 @@ impl Expander {
     }
 
     fn tdl_join_into_sequence(&self, environment: &Environment, values: &[&Element]) -> Sequence {
-        let elements: Vec<Element> = values.iter()
+        let elements: Vec<Element> = values
+            .iter()
             .flat_map(|e| self.expand_tdl_element(environment, e))
             .collect();
         Sequence::new(elements)
@@ -523,7 +554,8 @@ impl Expander {
 
     // `struct` is a keyword and cannot be a function name
     fn tdl_make_struct(&self, environment: &Environment, arguments: &[&Element]) -> Vec<Element> {
-        let elements: Vec<Element> = arguments.iter()
+        let elements: Vec<Element> = arguments
+            .iter()
             .flat_map(|e| self.expand_tdl_element(environment, e))
             .collect();
 
@@ -539,8 +571,13 @@ impl Expander {
             } else {
                 // It's not a struct, so it must be a text value
                 index += 1;
-                let value = elements.get(index).expect("Found `struct` field name with no corresponding value.");
-                new_fields.push((Symbol::owned(field_name_element.as_str().unwrap()), value.to_owned()))
+                let value = elements
+                    .get(index)
+                    .expect("Found `struct` field name with no corresponding value.");
+                new_fields.push((
+                    Symbol::owned(field_name_element.as_str().unwrap()),
+                    value.to_owned(),
+                ))
             }
             index += 1;
         }
@@ -550,12 +587,12 @@ impl Expander {
 
 #[cfg(test)]
 mod tests {
-    use std::default::Default;
     use crate::ion_eq::IonEq;
     use crate::templates::expander::Expander;
     use crate::value::native_reader::NativeElementReader;
     use crate::value::owned::Element;
     use crate::value::reader::ElementReader;
+    use std::default::Default;
 
     fn template_test(template_ion: &str, input_ion: &str, expected_ion: &str) {
         let expander = Expander::from_template_source(template_ion);
@@ -585,7 +622,7 @@ mod tests {
             {foo: Todd, bar: Tyler, baz: Zack}
             {foo: cat, bar: dog, baz: mouse}
             {foo: Curly, bar: Larry, baz: Moe}
-            "#
+            "#,
         );
     }
 
@@ -600,7 +637,7 @@ mod tests {
             }
             "#,
             "(:foo)",
-            "hello hello hello hello hello"
+            "hello hello hello hello hello",
         );
     }
 
@@ -615,7 +652,7 @@ mod tests {
             }
             "#,
             "(:foo)",
-            "(repeat 5 (stream hello))"
+            "(repeat 5 (stream hello))",
         );
     }
 
@@ -661,7 +698,7 @@ mod tests {
                 })
             "#,
             "(:xyz_struct 1 2 3)",
-            "{x: 1, y: 2, z: 3}"
+            "{x: 1, y: 2, z: 3}",
         );
     }
 
@@ -678,7 +715,7 @@ mod tests {
             }
             "#,
             "(:foo 71) (:foo quux) (:foo 2022T)",
-            "foo::bar::baz::71 foo::bar::baz::quux foo::bar::baz::2022T"
+            "foo::bar::baz::71 foo::bar::baz::quux foo::bar::baz::2022T",
         );
     }
 
@@ -695,7 +732,7 @@ mod tests {
             }
             "#,
             "(:greet (:empty)) (:greet 'Zack!')",
-            "\"hello, world!\" \"hello, Zack!\""
+            "\"hello, world!\" \"hello, Zack!\"",
         );
     }
 
@@ -721,16 +758,18 @@ mod tests {
                 {value: 5},
                 {value: 6},
             ]
-            "#
+            "#,
         );
     }
 
-    fn template_expansion_test(expander: Expander,
-                              input_ion: &str,
-                              expected_ion: &str) {
+    fn template_expansion_test(expander: Expander, input_ion: &str, expected_ion: &str) {
         let reader = NativeElementReader;
-        let input_elements = reader.read_all(input_ion.as_bytes()).expect("Invalid input Ion");
-        let expected_elements = reader.read_all(expected_ion.as_bytes()).expect("Invalid expected Ion");
+        let input_elements = reader
+            .read_all(input_ion.as_bytes())
+            .expect("Invalid input Ion");
+        let expected_elements = reader
+            .read_all(expected_ion.as_bytes())
+            .expect("Invalid expected Ion");
         let mut output_elements = vec![];
         for input_element in &input_elements {
             let expanded = expander.expand(&input_element);
@@ -750,12 +789,14 @@ mod tests {
         expansion_test(Default::default(), input_ion, expected_ion)
     }
 
-    fn expansion_test(expander: Expander,
-                      input_ion: &str,
-                      expected_ion: &str) {
+    fn expansion_test(expander: Expander, input_ion: &str, expected_ion: &str) {
         let reader = NativeElementReader;
-        let input_elements = reader.read_all(input_ion.as_bytes()).expect("Invalid input Ion");
-        let expected_elements = reader.read_all(expected_ion.as_bytes()).expect("Invalid expected Ion");
+        let input_elements = reader
+            .read_all(input_ion.as_bytes())
+            .expect("Invalid input Ion");
+        let expected_elements = reader
+            .read_all(expected_ion.as_bytes())
+            .expect("Invalid expected Ion");
         let mut output_elements = vec![];
         for input_element in &input_elements {
             let expanded = expander.expand(&input_element);
@@ -819,14 +860,20 @@ mod tests {
     fn string() {
         operator_test("(:string foo bar baz)", "\"foobarbaz\"");
         operator_test("(:string 'foo' \"bar\" \"\"\"baz\"\"\")", "\"foobarbaz\"");
-        operator_test("(:string (:inline ('foo' \"bar\" \"\"\"baz\"\"\")))", "\"foobarbaz\"");
+        operator_test(
+            "(:string (:inline ('foo' \"bar\" \"\"\"baz\"\"\")))",
+            "\"foobarbaz\"",
+        );
     }
 
     #[test]
     fn symbol() {
         operator_test("(:symbol foo bar baz)", "foobarbaz");
         operator_test("(:symbol 'foo' \"bar\" \"\"\"baz\"\"\")", "foobarbaz");
-        operator_test("(:symbol (:inline ('foo' \"bar\" \"\"\"baz\"\"\")))", "foobarbaz");
+        operator_test(
+            "(:symbol (:inline ('foo' \"bar\" \"\"\"baz\"\"\")))",
+            "foobarbaz",
+        );
     }
 
     #[test]
@@ -839,6 +886,9 @@ mod tests {
     #[test]
     fn test_struct() {
         operator_test("(:struct foo bar baz quux)", "{foo: bar, baz: quux}");
-        operator_test("(:struct foo bar {baz: quux, quuz: gary})", "{foo: bar, baz: quux, quuz: gary}");
+        operator_test(
+            "(:struct foo bar {baz: quux, quuz: gary})",
+            "{foo: bar, baz: quux, quuz: gary}",
+        );
     }
 }
