@@ -9,6 +9,48 @@ use std::collections::HashMap;
 
 type Environment = HashMap<String, Vec<Element>>;
 
+const SYSTEM_TEMPLATES: &str = r#"
+            {
+                name: param,
+                parameters: [
+                    {name: cardinality, encoding: any, cardinality: required},
+                    {name: encoding, encoding: any, cardinality: required},
+                    {name: name, encoding: any, cardinality: required},
+                ],
+                body: {
+                    name: name,
+                    cardinality: cardinality,
+                    encoding: encoding
+                }
+            }
+            {
+                name: params,
+                parameters: [
+                    (:param many template::param parameter_stream)
+                ],
+                body: (sexp parameter_stream) // Wraps parameter structs in an s-expression
+            }
+            {
+                name: define,
+                parameters: [
+                    (:param required any name),
+                    (:param required template::params parameters),
+                    (:param required any body),
+                ],
+                body: {
+                   name: name,
+                   parameters: parameters,
+                   body: body,
+                }
+            }
+"#;
+
+pub(crate) fn read_system_templates() -> Vec<Element> {
+    NativeElementReader
+        .read_all(SYSTEM_TEMPLATES.as_bytes())
+        .expect("invalid template source")
+}
+
 struct Expander {
     // Our list of template definitions
     templates: HashMap<String, Template>,
@@ -16,7 +58,7 @@ struct Expander {
 
 impl Default for Expander {
     fn default() -> Self {
-        Expander::with_templates([])
+        Expander::from_template_source("") // Only the system templates
     }
 }
 
@@ -25,19 +67,30 @@ impl Expander {
         let mut expander = Self {
             templates: HashMap::new(),
         };
-        for template_element in NativeElementReader
+
+        let system_templates = read_system_templates();
+        let local_templates = NativeElementReader
             .read_all(ion_data.as_bytes())
-            .expect("invalid template source")
-        {
+            .expect("invalid template source");
+
+        let all_templates = system_templates.into_iter().chain(local_templates);
+
+        for template_element in all_templates {
             let mut expanded_definition = expander.expand(&template_element);
             if expanded_definition.len() != 1 {
+                // TODO: Is this true? You can use `(:stream ...)`, but should we allow unwrapped?
                 panic!(
                     "template bodies must be exactly 1 expression, found {}",
                     expanded_definition.len()
                 )
             }
             let expanded_definition = expanded_definition.pop().unwrap();
+            println!("Expanded definition: {}", expanded_definition);
             let template = Template::from_ion(&expanded_definition).unwrap();
+            println!(
+                "Template '{}' loaded ok, adding to expander",
+                template.name()
+            );
             expander
                 .templates
                 .insert(template.name().to_owned(), template);
@@ -397,9 +450,20 @@ impl Expander {
                     template.name()
                 );
             }
+        } else if values.len() < parameters.len() {
+            // There are parameters that didn't get an argument
+            for parameter in &parameters[values.len()..] {
+                if parameter.cardinality() == Cardinality::Required {
+                    panic!(
+                        "No argument was passed for template '{}', parameter '{}', which has cardinality '{:?}'",
+                        template.name(),
+                        parameter.name(),
+                        parameter.cardinality(),
+                    );
+                }
+                scope.insert(parameter.name().to_owned(), Vec::new());
+            }
         }
-
-        // TODO: Bind unspecified trailing variadic arguments to `(:empty)`
 
         scope
     }
@@ -679,41 +743,35 @@ mod tests {
     }
 
     #[test]
-    fn template_1() {
+    fn xyz_struct() {
         template_test(
             r#"
-            {
-                name: foo,
-                parameters: [
-                    {name: x, encoding: any, cardinality: required},
-                    {name: y, encoding: any, cardinality: required},
-                    {name: z, encoding: any, cardinality: required},
-                ],
-                body: {foo: x, bar: y, baz: z}
-            }
+            (:define xyz_struct
+                ((required any x)
+                 (required any y)
+                 (required any z))
+                 {x: x, y: y, z: z})
             "#,
             r#"
-            (:foo Todd Tyler Zack)
-            (:foo cat dog mouse)
-            (:foo Curly Larry Moe)
+            (:xyz_struct foo bar baz)
+            (:xyz_struct cat dog mouse)
+            (:xyz_struct 1 2 3)
             "#,
             r#"
-            {foo: Todd, bar: Tyler, baz: Zack}
-            {foo: cat, bar: dog, baz: mouse}
-            {foo: Curly, bar: Larry, baz: Moe}
+            {x: foo, y: bar, z: baz}
+            {x: cat, y: dog, z: mouse}
+            {x: 1, y: 2, z: 3}
             "#,
         );
     }
 
     #[test]
-    fn template_2() {
+    fn tdl_repeat() {
         template_test(
             r#"
-            {
-                name: foo,
-                parameters: [],
-                body: (stream (repeat 5 (quote hello)))
-            }
+            (:define foo
+                ()
+                (repeat 5 (quote hello)))
             "#,
             "(:foo)",
             "hello hello hello hello hello",
@@ -721,14 +779,12 @@ mod tests {
     }
 
     #[test]
-    fn template_3() {
+    fn tdl_quote() {
         template_test(
             r#"
-            {
-                name: foo,
-                parameters: [],
-                body: (quote (repeat 5 (stream hello)))
-            }
+            (:define foo
+                ()
+                (quote (repeat 5 (stream hello))))
             "#,
             "(:foo)",
             "(repeat 5 (stream hello))",
@@ -736,69 +792,35 @@ mod tests {
     }
 
     #[test]
-    fn template_4() {
+    fn string_concatenation() {
         template_test(
             r#"
-            {
-                name: param,
-                parameters: [
-                    {name: cardinality, encoding: any, cardinality: required},
-                    {name: encoding, encoding: any, cardinality: required},
-                    {name: name, encoding: any, cardinality: required},
-                ],
-                body: {
-                    name: name,
-                    cardinality: cardinality,
-                    encoding: encoding
-                }
-            }
-            {
-                name: params,
-                parameters: [
-                    (:param many template::param parameter_stream)
-                ],
-                body: (sexp parameter_stream) // Wraps parameter structs in an s-expression
-            }
-            {
-                name: define,
-                parameters: [
-                    (:param required any name),
-                    (:param required template::params parameters),
-                    (:param required any body),
-                ],
-                body: {
-                   name: name,
-                   parameters: parameters,
-                   body: body,
-                }
-            }
-            (:define xyz_struct
-                (                     // Implicitly `:params`
-                    (required any x)  // Implicitly `:param`
-                    (required any y)  // Implicitly `:param`
-                    (required any z)) // Implicitly `:param`
-                {
-                    x: x,
-                    y: y,
-                    z: z,
-                })
+            (:define product_url
+                (
+                    (required any department)
+                    (required any product)
+                )
+                (string "https://example.com/department/" department "/product/" product)
+            )
             "#,
-            "(:xyz_struct 1 2 3)",
-            "{x: 1, y: 2, z: 3}",
+            r#"
+                (:product_url shoes "abc123")
+                (:product_url accessories "def456")
+            "#,
+            r#"
+                "https://example.com/department/shoes/product/abc123"
+                "https://example.com/department/accessories/product/def456"
+            "#,
         );
     }
 
     #[test]
-    fn template_5() {
+    fn tdl_annotated() {
         template_test(
             r#"
-            {
-                name: foo,
-                parameters: [
-                    {name: x, encoding: any, cardinality: required},
-                ],
-                body: (annotated (stream foo bar baz) x)
-            }
+            (:define foo
+                ((required any x))
+                (annotated (stream foo bar baz) x))
             "#,
             "(:foo 71) (:foo quux) (:foo 2022T)",
             "foo::bar::baz::71 foo::bar::baz::quux foo::bar::baz::2022T",
@@ -806,24 +828,26 @@ mod tests {
     }
 
     #[test]
-    fn template_6() {
+    fn default_values() {
         template_test(
             r#"
-            {
-                name: greet,
-                parameters: [
-                    {name: name, encoding: any, cardinality: optional},
-                ],
-                body: (string "hello, " (default name "world!"))
-            }
+            (:define greet
+                ((optional any name))
+                (string "hello, " (default name "world!")))
             "#,
-            "(:greet (:empty)) (:greet 'Zack!')",
-            "\"hello, world!\" \"hello, Zack!\"",
+            r#"
+                (:greet)
+                (:greet 'Zack!')
+            "#,
+            r#"
+                "hello, world!"
+                "hello, Zack!"
+            "#,
         );
     }
 
     #[test]
-    fn template_7() {
+    fn tdl_each() {
         template_test(
             r#"
             {
