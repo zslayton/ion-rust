@@ -132,6 +132,22 @@ const SYSTEM_TEMPLATES: &str = r#"
            body: body,
         }
     }
+
+    /*
+     * Now that the system templates above have been defined, we can use template invocations
+     * to concisely define new templates. For example:
+     *     (:define
+     *         xy_struct
+     *         ((required any x)
+     *          (required any y)
+     *          {x: x, y: y})
+     *
+     *     // Example usage
+     *     (:xy_struct foo bar)
+     *
+     *     // Example expansion
+     *     {x: foo, y: foo}
+     */
 "#;
 
 pub(crate) fn read_system_templates() -> Vec<Element> {
