@@ -515,46 +515,65 @@ impl Expander {
         let arguments = values.iter();
         let mut scope = HashMap::new();
 
+        // Iterate over the template's parameters and the invocation's arguments in lockstep.
+        // The `zip` iterator will return `None` when either the parameters or the arguments are
+        // exhausted. Cases in which they are not of equal length are handled below.
         for (param, argument_expr) in parameters.iter().zip(arguments) {
             self.bind_argument(&mut scope, template, param, argument_expr);
         }
 
         if values.len() > parameters.len() {
             // There are trailing arguments that have not yet been bound to a parameter name
-            let last_parameter = parameters.last().unwrap_or_else(|| {
-                panic!(
-                    "found arguments in invocation of template '{}', which takes no parameters",
-                    template.name()
-                )
-            });
-
-            if last_parameter.cardinality() == Cardinality::Many {
-                // We can assume all remaining arguments belong to the trailing `many` parameter
-                for argument_expr in &values[parameters.len()..] {
-                    self.bind_argument(&mut scope, template, last_parameter, argument_expr);
-                }
-            } else {
-                panic!(
-                    "found unbound arguments in invocation of template '{}'",
-                    template.name()
-                );
-            }
+            self.bind_trailing_arguments_to_last_parameter(template, values, parameters, &mut scope)
         } else if values.len() < parameters.len() {
             // There are parameters that didn't get an argument
-            for parameter in &parameters[values.len()..] {
-                if parameter.cardinality() == Cardinality::Required {
-                    panic!(
-                        "No argument was passed for template '{}', parameter '{}', which has cardinality '{:?}'",
-                        template.name(),
-                        parameter.name(),
-                        parameter.cardinality(),
-                    );
-                }
-                scope.insert(parameter.name().to_owned(), Vec::new());
-            }
+            Self::bind_empty_to_unspecified_parameters(template, values, parameters, &mut scope)
         }
 
         scope
+    }
+
+    fn bind_empty_to_unspecified_parameters(template: &Template,
+                                            values: &[&Element],
+                                            parameters: &[Parameter],
+                                            scope: &mut HashMap<String, Vec<Element>>) {
+        for parameter in &parameters[values.len()..] {
+            if parameter.cardinality() == Cardinality::Required {
+                panic!(
+                    "No argument was passed for template '{}', parameter '{}', which has cardinality '{:?}'",
+                    template.name(),
+                    parameter.name(),
+                    parameter.cardinality(),
+                );
+            }
+            scope.insert(parameter.name().to_owned(), Vec::new());
+        }
+    }
+
+    fn bind_trailing_arguments_to_last_parameter(&self,
+                                                 template: &Template,
+                                                 values: &[&Element],
+                                                 parameters: &[Parameter],
+                                                 mut scope: &mut HashMap<String, Vec<Element>>) {
+
+        let last_parameter = parameters.last().unwrap_or_else(|| {
+            panic!(
+                "found arguments in invocation of template '{}', which takes no parameters",
+                template.name()
+            )
+        });
+
+        if last_parameter.cardinality() == Cardinality::Many {
+            // We can assume all remaining arguments belong to the trailing `many` parameter
+            for argument_expr in &values[parameters.len()..] {
+                self.bind_argument(&mut scope, template, last_parameter, argument_expr);
+            }
+        } else {
+            panic!(
+                "found unbound arguments in invocation of template '{}'",
+                template.name()
+            );
+        }
     }
 
     fn bind_argument(
