@@ -746,21 +746,25 @@ mod tests {
     fn xyz_struct() {
         template_test(
             r#"
-            (:define xyz_struct
-                ((required any x)
-                 (required any y)
-                 (required any z))
-                 {x: x, y: y, z: z})
+                (:define xyz_struct     // Template name
+                    ((required any x)   // Parameter list
+                    (required any y)
+                    (required any z))
+                    {x: x, y: y, z: z}) // Body
             "#,
             r#"
-            (:xyz_struct foo bar baz)
-            (:xyz_struct cat dog mouse)
-            (:xyz_struct 1 2 3)
+                // Example Ion stream
+
+                (:xyz_struct foo bar baz)
+                (:xyz_struct cat dog mouse)
+                (:xyz_struct 1 2 3)
             "#,
             r#"
-            {x: foo, y: bar, z: baz}
-            {x: cat, y: dog, z: mouse}
-            {x: 1, y: 2, z: 3}
+                // Expanded form of the same stream
+
+                {x: foo, y: bar, z: baz}
+                {x: cat, y: dog, z: mouse}
+                {x: 1, y: 2, z: 3}
             "#,
         );
     }
@@ -769,25 +773,50 @@ mod tests {
     fn tdl_repeat() {
         template_test(
             r#"
-            (:define foo
-                ()
-                (repeat 5 (quote hello)))
+                (:define five_of        // Template name
+                    ((optional any x))  // Parameter list
+                    (repeat 5 x))       // Body
             "#,
-            "(:foo)",
-            "hello hello hello hello hello",
+            r#"
+                // Example Ion stream
+
+                (:five_of /*nothing*/)
+                (:five_of (:empty))
+                (:five_of foo)
+                (:five_of 5)
+            "#,
+            r#"
+                // Expanded form of the same stream
+
+                // nothing
+                // nothing
+                foo foo foo foo foo
+                5   5   5   5   5
+            "#,
         );
     }
 
     #[test]
     fn tdl_quote() {
+        // `quote` prevents its arguments from being expanded; instead,
+        // they are treated as literals.
         template_test(
             r#"
-            (:define foo
-                ()
-                (quote (repeat 5 (stream hello))))
+                (:define foo    // Template name
+                    ()          // Parameter list
+                    (quote      // Body
+                        (repeat 5 (stream hello))))
             "#,
-            "(:foo)",
-            "(repeat 5 (stream hello))",
+            r#"
+                // Example Ion stream
+
+                (:foo)
+            "#,
+            r#"
+                // Expanded form of the same stream
+
+                (repeat 5 (stream hello))
+            "#,
         );
     }
 
@@ -795,19 +824,24 @@ mod tests {
     fn string_concatenation() {
         template_test(
             r#"
-            (:define product_url
-                (
-                    (required any department)
-                    (required any product)
-                )
-                (string "https://example.com/department/" department "/product/" product)
-            )
+                (:define product_url            // Template name
+                    ((required any department)  // Parameter list
+                        (required any product))
+                    (string                     // Body
+                        "https://example.com/department/"
+                        department
+                        "/product/"
+                         product))
             "#,
             r#"
+                // Example Ion stream
+
                 (:product_url shoes "abc123")
                 (:product_url accessories "def456")
             "#,
             r#"
+                // The expanded form of the same stream
+
                 "https://example.com/department/shoes/product/abc123"
                 "https://example.com/department/accessories/product/def456"
             "#,
@@ -818,12 +852,26 @@ mod tests {
     fn tdl_annotated() {
         template_test(
             r#"
-            (:define foo
-                ((required any x))
-                (annotated (stream foo bar baz) x))
+                (:define foo                // Template name
+                    ((required any x))      // Parameter list
+                    (annotated              // Body
+                        (stream foo bar baz)
+                        x))
             "#,
-            "(:foo 71) (:foo quux) (:foo 2022T)",
-            "foo::bar::baz::71 foo::bar::baz::quux foo::bar::baz::2022T",
+            r#"
+                // Example Ion stream
+
+                (:foo 71)
+                (:foo quux)
+                (:foo 2022T)
+            "#,
+            r#"
+                // The expanded form of the same stream
+
+                foo::bar::baz::71
+                foo::bar::baz::quux
+                foo::bar::baz::2022T
+            "#,
         );
     }
 
@@ -831,15 +879,21 @@ mod tests {
     fn default_values() {
         template_test(
             r#"
-            (:define greet
-                ((optional any name))
-                (string "hello, " (default name "world!")))
+                (:define greet              // Template name
+                    ((optional any name))   // Parameter list
+                    (string                 // Body
+                        "hello, "
+                        (default name "world!")))
             "#,
             r#"
+                // Example Ion stream
+
                 (:greet)
                 (:greet 'Zack!')
             "#,
             r#"
+                // The expanded form of the same stream
+
                 "hello, world!"
                 "hello, Zack!"
             "#,
@@ -850,26 +904,31 @@ mod tests {
     fn tdl_each() {
         template_test(
             r#"
-            {
-                name: object_list,
-                parameters: [
-                    {name: sequence, encoding: any, cardinality: many},
-                ],
-                body: [(each x sequence {value: x})]
-            }
+                (:define object_list        // Template name
+                    ((many any sequence))   // Parameter list
+                    [                       // Body
+                        (each
+                            x           // Iteration variable
+                            sequence    // The stream over which to iterate
+                            {value: x}) // The expression that will be produced for each stream item
+                    ])
             "#,
             r#"
+                // Example Ion stream
+
                 (:object_list (:stream 1 2 3 4 5 6))
             "#,
             r#"
-            [
-                {value: 1},
-                {value: 2},
-                {value: 3},
-                {value: 4},
-                {value: 5},
-                {value: 6},
-            ]
+                // The expanded form of the same stream
+
+                [
+                    {value: 1},
+                    {value: 2},
+                    {value: 3},
+                    {value: 4},
+                    {value: 5},
+                    {value: 6},
+                ]
             "#,
         );
     }
