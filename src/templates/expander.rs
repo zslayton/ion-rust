@@ -10,39 +10,128 @@ use std::collections::HashMap;
 type Environment = HashMap<String, Vec<Element>>;
 
 const SYSTEM_TEMPLATES: &str = r#"
-            {
-                name: param,
-                parameters: [
-                    {name: cardinality, encoding: any, cardinality: required},
-                    {name: encoding, encoding: any, cardinality: required},
-                    {name: name, encoding: any, cardinality: required},
-                ],
-                body: {
-                    name: name,
-                    cardinality: cardinality,
-                    encoding: encoding
-                }
-            }
-            {
-                name: params,
-                parameters: [
-                    (:param many template::param parameter_stream)
-                ],
-                body: (sexp parameter_stream) // Wraps parameter structs in an s-expression
-            }
-            {
-                name: define,
-                parameters: [
-                    (:param required any name),
-                    (:param required template::params parameters),
-                    (:param required any body),
-                ],
-                body: {
-                   name: name,
-                   parameters: parameters,
-                   body: body,
-                }
-            }
+    /*
+    * Usages of `param` expand to an Ion struct that represents a template parameter definition.
+    *
+    * `param` takes three parameters:
+    *    1. cardinality - One of (required, optional, many), indicating whether the expression
+    *                     in that position should expand to exactly one value (`required`), zero or
+    *                     one values (`optional`), or any number of values (`many`).
+    *    2. encoding    - Indicates the binary encoding that will be used to serialize this
+    *                     parameter when the template is invoked from a binary stream. `any`
+    *                     refers a self-describing Ion value encoding that begins with a type
+    *                     descriptor.
+    *    3. name        - The parameter's name. Appearances of this symbol in the template body
+    *                     will be substituted with the corresponding argument passed at the
+    *                     invocation site.
+    *
+    * Example usage:
+    *     (:param
+    *         required // cardinality
+    *         any      // encoding
+    *         foo)     // name
+    *
+    * Example output:
+    *     {
+    *         cardinality: required,
+    *         encoding: any,
+    *         name: foo,
+    *     }
+    */
+    {
+        name: param,
+        parameters: [
+            {name: cardinality, encoding: any, cardinality: required},
+            {name: encoding, encoding: any, cardinality: required},
+            {name: name, encoding: any, cardinality: required},
+        ],
+        body: {
+            name: name,
+            cardinality: cardinality,
+            encoding: encoding
+        }
+    }
+
+    /*
+    * Usages of `params` expand to an Ion s-expression that represents a template's sequence of
+    * parameters.
+    *
+    * `params` takes a single parameter:
+    *    1. parameter_stream - A stream of Ion structs encoded as invocations of `param` (defined
+    *                          above).
+    *
+    *
+    * Example usage:
+    *     (:params
+    *         ((required any x)   // A sequence of invocations of the `param` template.
+    *          (optional any y)   // Note that because `parameter_stream` specifies an encoding of
+    *          (many any z)))     // of `template::param` (see below), we do not re-state
+    *                             // `:param` at the beginning of each nested s-expression.
+    *
+    * Example output:
+    *     (
+    *         {cardinality: required, encoding: any, name: foo}
+    *         {cardinality: optional, encoding: any, name: foo}
+    *         {cardinality: many, encoding: any, name: foo}
+    *     }
+    */
+    {
+        name: params,
+        parameters: [
+            // v-- This invokes the template `param` that was defined just above this template.
+            (:param many template::param parameter_stream)
+            //                       ^-- It also says that invocations of this template (`params`)
+            //                           expect a stream of invocations of `param` as arguments.
+        ],
+        body: (sexp parameter_stream) // Wraps the parameter struct stream in an s-expression
+    }
+
+   /*
+    * Usages of `define` expand to an Ion struct that represents a template definition.
+    *
+    * `define` takes three parameters:
+    *    1. name       - The name of the template. This is the name that will be used to invoke this
+    *                    template from an Ion stream. A template named 'foo' would be invoked using
+    *                    `(:foo arg1 arg2 ... argN)`.
+    *                    TODO: make this optional/nullable
+    *    2. parameters - A sequence of Ion structs representing parameter definitions. See the
+    *                    `param` template above for details. Encoded as an invocation of the
+    *                    `params` template.
+    *    3. body       - An Ion value representing a Template Definition Language (TDL) expression
+    *                    that will be evaluated each time this template is invoked.
+    *
+    * Example usage:
+    *     (:define
+    *         xy_struct           // The template's name
+    *         ((required any x)   // The template's parameter sequence, encoded as an invocation of
+    *          (required any y))  // the `params` template.
+    *         {x: x, y: y})       // The template's body. Appearances of the parameter names
+    *                             // will be replaced by the invocation's arguments at evaluation
+    *                             // time.
+    *
+    * Example output:
+    *     {
+    *         name: xy_struct,
+    *         parameters: (
+    *             {cardinality: required, encoding: any, name: x}
+    *             {cardinality: required, encoding: any, name: y}
+    *         ),
+    *         body: {x: x, y: y},
+    *     }
+    */
+    {
+        name: define,
+        parameters: (:params
+            (required any name)
+            (required template::params parameters)
+            (required any body)
+        ),
+        body: {
+           name: name,
+           parameters: parameters,
+           body: body,
+        }
+    }
 "#;
 
 pub(crate) fn read_system_templates() -> Vec<Element> {
