@@ -3,8 +3,9 @@ use crate::value::owned::Element;
 use crate::value::{IonElement, IonSequence, IonStruct};
 use crate::IonResult;
 
+#[derive(Debug, Clone)]
 pub struct Template {
-    pub(crate) name: String,
+    pub(crate) name: Option<String>,
     pub(crate) parameters: Vec<Parameter>,
     pub(crate) body: Element,
 }
@@ -15,11 +16,18 @@ impl Template {
             .as_struct()
             .ok_or_else(|| decoding_error_raw("template definition must be an Ion struct"))?;
 
-        let name = template_struct
+        let name_element = template_struct
             .get("name")
-            .and_then(|name| name.as_str())
-            .ok_or_else(|| decoding_error_raw("template definition must have a text 'name'"))?
-            .to_owned();
+            .ok_or_else(|| decoding_error_raw("template definition must have a 'name' field"))?;
+
+        let name = if name_element.is_null() {
+            None
+        } else {
+            let text = name_element
+                .as_str()
+                .ok_or_else(|| decoding_error_raw("template 'name' must be text or null"))?;
+            Some(text.to_owned())
+        };
 
         let parameters = template_struct
             .get("parameters")
@@ -42,8 +50,8 @@ impl Template {
             body,
         })
     }
-    pub fn name(&self) -> &str {
-        &self.name
+    pub fn name(&self) -> Option<&str> {
+        self.name.as_ref().map(|name| name.as_str())
     }
     pub fn parameters(&self) -> &[Parameter] {
         self.parameters.as_slice()
@@ -101,6 +109,7 @@ impl Cardinality {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Parameter {
     name: String,
     encoding: Encoding,

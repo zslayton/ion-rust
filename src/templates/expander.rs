@@ -156,61 +156,93 @@ pub(crate) fn read_system_templates() -> Vec<Element> {
         .expect("invalid template source")
 }
 
+#[derive(Debug, Clone)]
 struct Expander {
     // Our list of template definitions
-    templates: HashMap<String, Template>,
+    templates_by_name: HashMap<String, usize>,
+    templates_by_id: Vec<Template>,
 }
 
 impl Default for Expander {
     fn default() -> Self {
-        Expander::from_template_source("") // Only the system templates
+        Expander::with_system_templates()
     }
 }
 
 impl Expander {
-    pub fn from_template_source(ion_data: &str) -> Self {
-        let mut expander = Self {
-            templates: HashMap::new(),
-        };
+    pub fn without_system_templates() -> Self {
+        Expander {
+            templates_by_id: Vec::new(),
+            templates_by_name: HashMap::new(),
+        }
+    }
 
-        let system_templates = read_system_templates();
-        let local_templates = NativeElementReader
-            .read_all(ion_data.as_bytes())
-            .expect("invalid template source");
+    pub fn with_system_templates() -> Self {
+        Expander::from_template_elements(read_system_templates().into_iter())
+    }
 
-        let all_templates = system_templates.into_iter().chain(local_templates);
+    pub fn add_template(&mut self, template: Template) {
+        if let Some(name) = template.name() {
+            self.templates_by_name
+                .insert(name.to_owned(), self.templates_by_id.len());
+        }
+        self.templates_by_id.push(template);
+    }
 
-        for template_element in all_templates {
-            let mut expanded_definition = expander.expand(&template_element);
-            if expanded_definition.len() != 1 {
+    pub fn get_template_by_id(&self, template_id: usize) -> Option<&Template> {
+        self.templates_by_id.get(template_id)
+    }
+
+    pub fn get_template_by_name(&self, template_name: &str) -> Option<&Template> {
+        self.templates_by_name
+            .get(template_name)
+            .and_then(|id| self.get_template_by_id(*id))
+    }
+
+    /// Constructs an Expander containing ONLY the provided templates (that is: no system templates)
+    pub fn from_template_elements<I: Iterator<Item = Element>>(elements: I) -> Self {
+        let mut expander = Expander::without_system_templates();
+        for template_element in elements {
+            let mut definition_elements = expander.expand(&template_element);
+            if definition_elements.len() != 1 {
                 // TODO: Is this true? You can use `(:stream ...)`, but should we allow unwrapped?
                 panic!(
                     "template bodies must be exactly 1 expression, found {}",
-                    expanded_definition.len()
+                    definition_elements.len()
                 )
             }
-            let expanded_definition = expanded_definition.pop().unwrap();
+            let expanded_definition = definition_elements.pop().unwrap();
             println!("Expanded definition: {}", expanded_definition);
             let template = Template::from_ion(&expanded_definition).unwrap();
             println!(
                 "Template '{}' loaded ok, adding to expander",
-                template.name()
+                template.name().unwrap_or("<anonymous>")
             );
-            expander
-                .templates
-                .insert(template.name().to_owned(), template);
+            expander.add_template(template);
         }
         expander
     }
 
-    pub fn with_templates<I: IntoIterator<Item = Template>>(templates: I) -> Self {
-        let templates_map: HashMap<String, Template> = templates
+    pub fn with_local_template_source(ion_data: &str) -> Self {
+        let system_template_elements = read_system_templates();
+
+        let template_elements = NativeElementReader
+            .read_all(ion_data.as_bytes())
+            .expect("invalid template source");
+
+        let all_template_elements = system_template_elements
             .into_iter()
-            .map(|t| (t.name().to_owned(), t))
-            .collect();
-        Self {
-            templates: templates_map,
-        }
+            .chain(template_elements.into_iter());
+
+        Expander::from_template_elements(all_template_elements)
+    }
+
+    pub fn with_templates<I: IntoIterator<Item = Template>>(templates: I) -> Self {
+        let mut expander = Expander::without_system_templates();
+        templates
+            .into_iter()
+            .for_each(|template| expander.add_template(template));
+        expander
     }
 
     pub fn expand(&self, input: &Element) -> Vec<Element> {
@@ -264,12 +296,27 @@ impl Expander {
             panic!("empty template invocation");
         }
         // TODO: Other forms of template identifier (int, fully qualified)
-        let name = invocation
+        let name_element = invocation
             .get(0)
-            .unwrap()
-            .as_str()
-            .expect("template name was not text");
+            .expect("found an empty template invocation");
         let arguments = &invocation[1..];
+
+        if let Some(template_id) = name_element.as_i64() {
+            let template_id: usize =
+                usize::try_from(template_id).expect("could not convert template ID to usize");
+            let template = self
+                .get_template_by_id(template_id)
+                .unwrap_or_else(|| panic!("reference to unknown template ID: {}", template_id));
+            return self.expand_template(template, arguments);
+        }
+        let name = name_element.as_str().unwrap_or_else(|| {
+            panic!(
+                "template identifier was neither int nor text: {}",
+                name_element
+            )
+        });
+
+        // TODO: prune this list of exposed templates
         match name {
             "empty" => vec![],
             "stream" => self.stream(arguments),
@@ -283,7 +330,12 @@ impl Expander {
             "sexp" => self.sexp(arguments),
             "struct" => self.make_struct(arguments), // `struct` is a keyword
             "quote" => self.quote(arguments),
-            template_name => self.expand_template(template_name, arguments),
+            template_name => {
+                let template = self.get_template_by_name(template_name).unwrap_or_else(|| {
+                    panic!("reference to unknown template name: {}", template_name)
+                });
+                self.expand_template(template, arguments)
+            }
         }
     }
 
@@ -439,11 +491,7 @@ impl Expander {
         Sequence::new(elements)
     }
 
-    fn expand_template(&self, template_name: &str, values: &[&Element]) -> Vec<Element> {
-        let template = self
-            .templates
-            .get(template_name)
-            .unwrap_or_else(|| panic!("reference to unknown template: {}", template_name));
+    fn expand_template(&self, template: &Template, values: &[&Element]) -> Vec<Element> {
         let environment = self.bind_arguments(template, values);
         let body = template.body();
         self.expand_tdl_element(&environment, body)
@@ -479,11 +527,28 @@ impl Expander {
         if child_elements.is_empty() {
             panic!("empty operation");
         }
-        // TODO: Other forms of template identifier (int, fully qualified)
-        let name = child_elements[0]
-            .as_str()
-            .expect("template name was not text");
+        // TODO: Other forms of template identifier (fully qualified)
+        let name_element = child_elements
+            .get(0)
+            .expect("found an empty template invocation");
         let arguments = &child_elements[1..];
+
+        if let Some(template_id) = name_element.as_i64() {
+            let template_id: usize =
+                usize::try_from(template_id).expect("could not convert template ID to usize");
+            let template = self
+                .get_template_by_id(template_id)
+                .unwrap_or_else(|| panic!("reference to unknown template ID: {}", template_id));
+            return self.expand_template(template, arguments);
+        }
+
+        let name = name_element.as_str().unwrap_or_else(|| {
+            panic!(
+                "template identifier was neither int nor text: {}",
+                name_element
+            )
+        });
+
         match name {
             "empty" => vec![],
             "quote" => self.tdl_op_quote(environment, arguments),
@@ -499,7 +564,12 @@ impl Expander {
             "sexp" => self.tdl_op_sexp(environment, arguments),
             "struct" => self.tdl_make_struct(environment, arguments), // `struct` is a keyword,
             "each" => self.tdl_op_each(environment, arguments),
-            template_name => self.expand_template(template_name, arguments),
+            template_name => {
+                let template = self.get_template_by_name(template_name).unwrap_or_else(|| {
+                    panic!("reference to unknown template name: {}", template_name)
+                });
+                self.expand_template(template, arguments)
+            },
         }
     }
 
@@ -549,15 +619,17 @@ impl Expander {
         scope
     }
 
-    fn bind_empty_to_unspecified_parameters(template: &Template,
-                                            values: &[&Element],
-                                            parameters: &[Parameter],
-                                            scope: &mut HashMap<String, Vec<Element>>) {
+    fn bind_empty_to_unspecified_parameters(
+        template: &Template,
+        values: &[&Element],
+        parameters: &[Parameter],
+        scope: &mut HashMap<String, Vec<Element>>,
+    ) {
         for parameter in &parameters[values.len()..] {
             if parameter.cardinality() == Cardinality::Required {
                 panic!(
                     "No argument was passed for template '{}', parameter '{}', which has cardinality '{:?}'",
-                    template.name(),
+                    template.name().unwrap_or("<anonymous>"),
                     parameter.name(),
                     parameter.cardinality(),
                 );
@@ -566,16 +638,17 @@ impl Expander {
         }
     }
 
-    fn bind_trailing_arguments_to_last_parameter(&self,
-                                                 template: &Template,
-                                                 values: &[&Element],
-                                                 parameters: &[Parameter],
-                                                 mut scope: &mut HashMap<String, Vec<Element>>) {
-
+    fn bind_trailing_arguments_to_last_parameter(
+        &self,
+        template: &Template,
+        values: &[&Element],
+        parameters: &[Parameter],
+        mut scope: &mut HashMap<String, Vec<Element>>,
+    ) {
         let last_parameter = parameters.last().unwrap_or_else(|| {
             panic!(
                 "found arguments in invocation of template '{}', which takes no parameters",
-                template.name()
+                template.name().unwrap_or("<anonymous>")
             )
         });
 
@@ -587,7 +660,7 @@ impl Expander {
         } else {
             panic!(
                 "found unbound arguments in invocation of template '{}'",
-                template.name()
+                template.name().unwrap_or("<anonymous>")
             );
         }
     }
@@ -601,11 +674,12 @@ impl Expander {
     ) {
         // If the parameter's encoding is a template, we look for an s-expression representing
         // its arguments. The template name is implied.
+        // TODO: Encoding::Template should support name, ID, or fully qualified template identifiers
         let expanded_argument = if let Encoding::Template(template_name) = param.encoding() {
             if argument_expr.ion_type() != IonType::SExpression {
                 panic!(
                     "Template '{}' param '{}' has encoding template::{} but argument was: {}",
-                    template.name(),
+                    template.name().unwrap_or("<anonymous>"),
                     param.name(),
                     template_name,
                     argument_expr
@@ -617,7 +691,17 @@ impl Expander {
                 )
             }
             let template_arguments = Self::sequence_elements(argument_expr);
-            self.expand_template(template_name.as_ref(), template_arguments.as_slice())
+            let parameter_encoding_template = self
+                .get_template_by_name(template_name)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "Template '{}' param '{}' has encoding `template::{}`, which is not defined",
+                        template.name().unwrap_or("<anonymous>"),
+                        param.name(),
+                        template_name
+                    )
+                });
+            self.expand_template(parameter_encoding_template, template_arguments.as_slice())
         } else {
             self.expand(argument_expr)
         };
@@ -862,7 +946,7 @@ mod tests {
     use std::default::Default;
 
     fn template_test(template_ion: &str, input_ion: &str, expected_ion: &str) {
-        let expander = Expander::from_template_source(template_ion);
+        let expander = Expander::with_local_template_source(template_ion);
         expansion_test(expander, input_ion, expected_ion);
     }
 
@@ -1053,6 +1137,37 @@ mod tests {
                     {value: 5},
                     {value: 6},
                 ]
+            "#,
+        );
+    }
+
+    #[test]
+    fn templates_by_local_id() {
+        template_test(
+            r#"
+                (:define home       // Template name (ID = 3, first non-system template)
+                    ()              // Parameter list
+                    Earth)          // Body
+
+                (:define planet     // Template name (ID = 4)
+                    ()              // Parameter list
+                    (3))            // Body (invokes `home` by ID)
+            "#,
+            r#"
+                // Example Ion stream
+
+                (:home)
+                (:planet)
+                (:3)
+                (:4)
+            "#,
+            r#"
+                // The expanded form of the same stream
+
+                Earth
+                Earth
+                Earth
+                Earth
             "#,
         );
     }
