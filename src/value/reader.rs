@@ -233,20 +233,23 @@ mod reader_tests {
             ["a", "b"]
         "#,
         vec![
-            vec!["a", "b"].into_iter().map(|s| String(s.into()).into()).collect(),
-        ].into_iter()
-            .map(|elems: Vec<Element>| List(elems.into_iter().collect()).into())
-            .collect(),
+             Element::list_builder()
+                .push("a")
+                .push("b")
+                .build()
+        ]
     )]
     #[case::sexps(
         br#"
             (e f g)
         "#,
         vec![
-            vec!["e", "f", "g"].into_iter().map(|s| Symbol(s.into()).into()).collect(),
-        ].into_iter()
-            .map(|elems: Vec<Element>| SExpression(elems.into_iter().collect()).into())
-            .collect(),
+            Element::sexp_builder()
+                .push(Symbol::owned("e"))
+                .push(Symbol::owned("f"))
+                .push(Symbol::owned("g"))
+                .build()
+        ]
     )]
     #[case::structs(
         br#"
