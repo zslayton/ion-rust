@@ -63,13 +63,13 @@ impl IonEq for Value {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Null(IonType),
+    Bool(bool),
     Int(Int),
     Float(f64),
     Decimal(Decimal),
     Timestamp(Timestamp),
     String(Str),
     Symbol(Symbol),
-    Bool(bool),
     Blob(Bytes),
     Clob(Bytes),
     SExp(Sequence),

@@ -207,6 +207,7 @@ pub use types::decimal::Decimal;
 pub use types::integer::Int;
 pub use types::string::Str;
 pub use types::timestamp::Timestamp;
+pub use types::value_ref::ValueRef;
 pub use types::IonType;
 
 pub use binary::binary_writer::{BinaryWriter, BinaryWriterBuilder};

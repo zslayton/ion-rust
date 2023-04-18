@@ -1,28 +1,98 @@
+use crate::symbol::SymbolText;
 use crate::Symbol;
 use std::borrow::Borrow;
-use std::hash::{Hash, Hasher};
+use std::cmp::Ordering;
+use std::hash::Hash;
+use std::sync::Arc;
+
+/// Holds a reference to the text of a given [SymbolRef].
+// Originally, a SymbolRef's text was stored in an Option<&str>. However, a common use case for a
+// SymbolRef is to call `to_owned()` on it, converting it to a `Symbol`.
+// For example:
+//     let symbol = reader.read_symbol_ref().to_owned();
+// If the text is stored in an `Option<&str>`, then to convert it to a `Symbol` the application will
+// either have to copy the `&str` to a `String` or re-resolve the text in the symbol table to get
+// the corresponding `Arc<str>`.
+// By storing an `Arc<str>` when the SymbolRef's text lives in the symbol table, we can convert a
+// SymbolRef into a Symbol for free, moving the Arc<str> field from one struct to the other.
+#[derive(Debug, Eq, Clone, Hash)]
+enum SymbolRefText<'a> {
+    // This symbol's text was found in the symbol table
+    Shared(Arc<str>),
+    // This symbol's text was found inline in the input stream
+    Borrowed(&'a str),
+    // This symbol is equivalent to SID zero (`$0`)
+    Unknown,
+}
+
+impl<'a> SymbolRefText<'a> {
+    fn text(&self) -> Option<&str> {
+        let text = match self {
+            SymbolRefText::Shared(s) => s.as_ref(),
+            SymbolRefText::Borrowed(s) => s,
+            SymbolRefText::Unknown => return None,
+        };
+        Some(text)
+    }
+}
+
+impl<'a> PartialEq<Self> for SymbolRefText<'a> {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other) == Ordering::Equal
+    }
+}
+
+impl<'a> PartialOrd<Self> for SymbolRefText<'a> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl<'a> Ord for SymbolRefText<'a> {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match (self.text(), other.text()) {
+            // If both Symbols have known text, delegate the comparison to their text.
+            (Some(s1), Some(s2)) => s1.cmp(s2),
+            // Otherwise, $0 (unknown text) is treated as 'less than' known text
+            (Some(_), None) => Ordering::Greater,
+            (None, Some(_)) => Ordering::Less,
+            (None, None) => Ordering::Equal,
+        }
+    }
+}
 
 /// A reference to a fully resolved symbol. Like `Symbol` (a fully resolved symbol with a
 /// static lifetime), a `SymbolRef` may have known or undefined text.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Hash)]
 pub struct SymbolRef<'a> {
-    text: Option<&'a str>,
+    text: SymbolRefText<'a>,
 }
 
 impl<'a> SymbolRef<'a> {
     /// If this symbol has known text, returns `Some(&str)`. Otherwise, returns `None`.
     pub fn text(&self) -> Option<&str> {
-        self.text
+        self.text.text()
     }
 
     /// Constructs a `SymbolRef` with unknown text.
     pub fn with_unknown_text() -> Self {
-        SymbolRef { text: None }
+        SymbolRef {
+            text: SymbolRefText::Unknown,
+        }
     }
 
     /// Constructs a `SymbolRef` with the specified text.
     pub fn with_text(text: &str) -> SymbolRef {
-        SymbolRef { text: Some(text) }
+        SymbolRef {
+            text: SymbolRefText::Borrowed(text),
+        }
+    }
+
+    // Restricted visibility in case we want to change `Arc` later.
+    pub(crate) fn with_shared_text(text: Arc<str>) -> SymbolRef<'static> {
+        SymbolRef {
+            text: SymbolRefText::Shared(text),
+        }
     }
 }
 
@@ -36,23 +106,23 @@ pub trait AsSymbolRef {
 impl<'a, A: AsRef<str> + 'a> AsSymbolRef for A {
     fn as_symbol_ref(&self) -> SymbolRef {
         SymbolRef {
-            text: Some(self.as_ref()),
-        }
-    }
-}
-
-impl<'a> Hash for SymbolRef<'a> {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        match self.text {
-            None => 0.hash(state),
-            Some(text) => text.hash(state),
+            text: SymbolRefText::Borrowed(self.as_ref()),
         }
     }
 }
 
 impl<'a> From<&'a str> for SymbolRef<'a> {
     fn from(text: &'a str) -> Self {
-        Self { text: Some(text) }
+        SymbolRef::with_text(text)
+    }
+}
+
+impl<'a> From<Option<&'a str>> for SymbolRef<'a> {
+    fn from(text: Option<&'a str>) -> Self {
+        match text {
+            Some(text) => SymbolRef::with_text(text),
+            None => SymbolRef::with_unknown_text(),
+        }
     }
 }
 
@@ -69,23 +139,25 @@ impl<'a> Borrow<str> for SymbolRef<'a> {
 // trait definitions, this cannot be achieved with `AsRef` or `Borrow`.
 impl AsSymbolRef for Symbol {
     fn as_symbol_ref(&self) -> SymbolRef {
-        self.text()
-            .map(SymbolRef::with_text)
-            .unwrap_or_else(SymbolRef::with_unknown_text)
+        let Symbol { text } = self;
+        match text {
+            SymbolText::Shared(arc_str) => SymbolRef::with_shared_text(Arc::clone(arc_str)),
+            SymbolText::Owned(text) => SymbolRef::with_text(text.as_str()),
+            SymbolText::Unknown => SymbolRef::with_unknown_text(),
+        }
     }
 }
 
 impl AsSymbolRef for &Symbol {
     fn as_symbol_ref(&self) -> SymbolRef {
-        self.text()
-            .map(SymbolRef::with_text)
-            .unwrap_or_else(SymbolRef::with_unknown_text)
+        (*self).as_symbol_ref()
     }
 }
 
 impl<'borrow, 'data> AsSymbolRef for &'borrow SymbolRef<'data> {
     fn as_symbol_ref(&self) -> SymbolRef<'data> {
-        // This is essentially free; the only data inside is an Option<&str>
+        // This is cheap; we're cloning either a `&str` (runtime no-op) or an `Arc<str>` (which
+        // requires an atomic integer increment.)
         (*self).clone()
     }
 }

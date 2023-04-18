@@ -13,6 +13,7 @@ use crate::types::decimal::Decimal;
 use crate::types::integer::Int;
 use crate::types::string::Str;
 use crate::types::timestamp::Timestamp;
+use crate::types::value_ref::ValueRef;
 use crate::{BlockingRawBinaryReader, IonReader, IonType, SymbolTable};
 
 /// Tracks where the [SystemReader] is in the process of reading a local symbol table.
@@ -676,7 +677,7 @@ impl<R: RawReader> IonReader for SystemReader<R> {
         self.raw_reader.read_str()
     }
 
-    // The SystemReader needs to expose many of the same functions as the Cursor, but only some of
+    // The SystemReader needs to expose many of the same functions as the RawReader, but only some of
     // those need to be re-defined to allow for system value processing. Any method listed here will
     // be delegated to self.raw_reader directly.
     delegate! {
@@ -692,10 +693,38 @@ impl<R: RawReader> IonReader for SystemReader<R> {
             fn read_f64(&mut self) -> IonResult<f64>;
             fn read_decimal(&mut self) -> IonResult<Decimal>;
             fn read_blob(&mut self) -> IonResult<Blob>;
+            fn read_blob_bytes(&mut self) -> IonResult<&[u8]>;
             fn read_clob(&mut self) -> IonResult<Clob>;
+            fn read_clob_bytes(&mut self) -> IonResult<&[u8]>;
             fn read_timestamp(&mut self) -> IonResult<Timestamp>;
             fn depth(&self) -> usize;
             fn parent_type(&self) -> Option<IonType>;
+        }
+    }
+
+    fn read_value(&mut self) -> IonResult<ValueRef<Self::Symbol>> {
+        match self.current_item {
+            SystemStreamItem::SymbolTableNull(ion_type) | SystemStreamItem::Null(ion_type) => {
+                Ok(ValueRef::Null(ion_type))
+            }
+            SystemStreamItem::SymbolTableValue(ion_type) | SystemStreamItem::Value(ion_type) => {
+                match ion_type {
+                    IonType::Null => unreachable!("null is handled in an earlier match arm"),
+                    IonType::Bool => self.read_bool().map(ValueRef::Bool),
+                    IonType::Int => self.read_int().map(ValueRef::Int),
+                    IonType::Float => self.read_f64().map(ValueRef::Float),
+                    IonType::Decimal => self.read_decimal().map(ValueRef::Decimal),
+                    IonType::Timestamp => self.read_timestamp().map(ValueRef::Timestamp),
+                    IonType::Symbol => self.read_symbol().map(ValueRef::Symbol),
+                    IonType::String => self.read_str().map(ValueRef::String),
+                    IonType::Clob => self.read_clob_bytes().map(ValueRef::Clob),
+                    IonType::Blob => self.read_blob_bytes().map(ValueRef::Blob),
+                    IonType::List => Ok(ValueRef::List),
+                    IonType::SExp => Ok(ValueRef::SExp),
+                    IonType::Struct => Ok(ValueRef::Struct),
+                }
+            }
+            _ => illegal_operation("reader is not currently positioned on a value"),
         }
     }
 }

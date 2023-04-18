@@ -9,6 +9,7 @@ use crate::result::IonResult;
 use crate::stream_reader::IonReader;
 use crate::text::non_blocking::raw_text_reader::RawTextReader;
 use crate::types::timestamp::Timestamp;
+use crate::types::value_ref::ValueRef;
 use crate::{Decimal, Int, IonError, IonType, Str};
 
 pub type BlockingRawTextReader<T> = BlockingRawReader<RawTextReader<Vec<u8>>, T>;
@@ -195,6 +196,20 @@ impl<R: BufferedRawReader, T: ToIonDataSource> IonReader for BlockingRawReader<R
     fn depth(&self) -> usize {
         self.reader.depth()
     }
+
+    fn read_value(&mut self) -> IonResult<ValueRef<Self::Symbol>> {
+        self.reader.read_value()
+    }
+
+    fn read_blob_bytes(&mut self) -> IonResult<&[u8]> {
+        self.reader.read_blob_bytes()
+    }
+
+    fn read_clob_bytes(&mut self) -> IonResult<&[u8]> {
+        self.reader.read_clob_bytes()
+    }
+
+    // TODO: Replace most of the above impls with delegate!
 }
 
 impl<T: ToIonDataSource> BlockingRawReader<RawBinaryReader<Vec<u8>>, T> {

@@ -10,7 +10,7 @@ use crate::data_source::ToIonDataSource;
 use crate::element::{Blob, Clob};
 use crate::raw_reader::{RawReader, RawStreamItem};
 use crate::raw_symbol_token::RawSymbolToken;
-use crate::result::{decoding_error, decoding_error_raw, IonResult};
+use crate::result::{decoding_error, decoding_error_raw, illegal_operation, IonResult};
 use crate::stream_reader::IonReader;
 use crate::symbol::Symbol;
 use crate::symbol_table::SymbolTable;
@@ -21,6 +21,8 @@ use crate::{BlockingRawBinaryReader, BlockingRawTextReader, IonType};
 use std::fmt::{Display, Formatter};
 
 use crate::types::string::Str;
+use crate::types::value_ref::ValueRef;
+
 /// Configures and constructs new instances of [Reader].
 pub struct ReaderBuilder {}
 
@@ -436,12 +438,38 @@ impl<R: RawReader> IonReader for UserReader<R> {
             fn read_string(&mut self) -> IonResult<Str>;
             fn read_str(&mut self) -> IonResult<&str>;
             fn read_blob(&mut self) -> IonResult<Blob>;
+            fn read_blob_bytes(&mut self) -> IonResult<&[u8]>;
             fn read_clob(&mut self) -> IonResult<Clob>;
+            fn read_clob_bytes(&mut self) -> IonResult<&[u8]>;
             fn read_timestamp(&mut self) -> IonResult<Timestamp>;
             fn step_in(&mut self) -> IonResult<()>;
             fn step_out(&mut self) -> IonResult<()>;
             fn parent_type(&self) -> Option<IonType>;
             fn depth(&self) -> usize;
+        }
+    }
+
+    fn read_value(&mut self) -> IonResult<ValueRef<Self::Symbol>> {
+        match self.current() {
+            StreamItem::Nothing => {
+                illegal_operation("the reader is not positioned on a value")
+            }
+            StreamItem::Null(ion_type) => Ok(ValueRef::Null(ion_type)),
+            StreamItem::Value(ion_type) => match ion_type {
+                IonType::Null => unreachable!("null is handled in an earlier match arm"),
+                IonType::Bool => self.read_bool().map(ValueRef::Bool),
+                IonType::Int => self.read_int().map(ValueRef::Int),
+                IonType::Float => self.read_f64().map(ValueRef::Float),
+                IonType::Decimal => self.read_decimal().map(ValueRef::Decimal),
+                IonType::Timestamp => self.read_timestamp().map(ValueRef::Timestamp),
+                IonType::Symbol => self.read_symbol().map(ValueRef::Symbol),
+                IonType::String => self.read_str().map(ValueRef::String),
+                IonType::Clob => self.read_clob_bytes().map(ValueRef::Clob),
+                IonType::Blob => self.read_blob_bytes().map(ValueRef::Blob),
+                IonType::List => Ok(ValueRef::List),
+                IonType::SExp => Ok(ValueRef::SExp),
+                IonType::Struct => Ok(ValueRef::Struct),
+            },
         }
     }
 }

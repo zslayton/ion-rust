@@ -23,7 +23,8 @@ use crate::text::text_value::{AnnotatedTextValue, TextValue};
 use crate::types::decimal::Decimal;
 use crate::types::integer::Int;
 use crate::types::timestamp::Timestamp;
-use crate::IonType;
+use crate::types::value_ref::ValueRef;
+use crate::{IonType};
 
 const INITIAL_PARENTS_CAPACITY: usize = 16;
 
@@ -865,17 +866,11 @@ impl<A: AsRef<[u8]> + Expandable> IonReader for RawTextReader<A> {
     }
 
     fn read_blob(&mut self) -> IonResult<Blob> {
-        match self.current_value.as_ref().map(|current| current.value()) {
-            Some(TextValue::Blob(ref value)) => Ok(Blob::from(value.as_slice())),
-            _ => Err(self.expected("blob value")),
-        }
+        self.read_blob_bytes().map(Blob::from)
     }
 
     fn read_clob(&mut self) -> IonResult<Clob> {
-        match self.current_value.as_ref().map(|current| current.value()) {
-            Some(TextValue::Clob(ref value)) => Ok(Clob::from(value.as_slice())),
-            _ => Err(self.expected("clob value")),
-        }
+        self.read_clob_bytes().map(Clob::from)
     }
 
     fn read_timestamp(&mut self) -> IonResult<Timestamp> {
@@ -959,6 +954,44 @@ impl<A: AsRef<[u8]> + Expandable> IonReader for RawTextReader<A> {
 
     fn depth(&self) -> usize {
         self.parents.len()
+    }
+
+    fn read_value(&mut self) -> IonResult<ValueRef<Self::Symbol>> {
+        let text_value = match self.current_value.as_ref() {
+            None => return illegal_operation("the reader is not positioned on a value"),
+            Some(text_value) => text_value,
+        };
+
+        let value_ref = match text_value.value() {
+            TextValue::Null(ion_type) => ValueRef::Null(*ion_type),
+            TextValue::Bool(b) => ValueRef::Bool(*b),
+            TextValue::Int(i) => ValueRef::Int(i.clone()),
+            TextValue::Float(f) => ValueRef::Float(*f),
+            TextValue::Decimal(d) => ValueRef::Decimal(d.clone()),
+            TextValue::Timestamp(t) => ValueRef::Timestamp(t.clone()),
+            TextValue::String(s) => ValueRef::String(s.as_str()),
+            TextValue::Symbol(sym) => ValueRef::Symbol(sym.clone()),
+            TextValue::Blob(b) => ValueRef::Blob(b.as_slice()),
+            TextValue::Clob(c) => ValueRef::Clob(c.as_slice()),
+            TextValue::ListStart => ValueRef::List,
+            TextValue::SExpStart => ValueRef::SExp,
+            TextValue::StructStart => ValueRef::Struct,
+        };
+        Ok(value_ref)
+    }
+
+    fn read_blob_bytes(&mut self) -> IonResult<&[u8]> {
+        match self.current_value.as_ref().map(|current| current.value()) {
+            Some(TextValue::Blob(ref value)) => Ok(value.as_slice()),
+            _ => Err(self.expected("blob value")),
+        }
+    }
+
+    fn read_clob_bytes(&mut self) -> IonResult<&[u8]> {
+        match self.current_value.as_ref().map(|current| current.value()) {
+            Some(TextValue::Clob(ref value)) => Ok(value.as_slice()),
+            _ => Err(self.expected("clob value")),
+        }
     }
 }
 

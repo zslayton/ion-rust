@@ -2,6 +2,7 @@ use crate::element::{Blob, Clob};
 use crate::raw_symbol_token::RawSymbolToken;
 use crate::stream_reader::IonReader;
 use crate::types::string::Str;
+use crate::types::value_ref::ValueRef;
 use crate::types::IonType;
 use crate::{Decimal, Int, IonResult, Timestamp};
 use std::fmt::{Display, Formatter};
@@ -51,6 +52,10 @@ impl<R: RawReader + ?Sized> IonReader for Box<R> {
         (**self).is_null()
     }
 
+    fn read_value(&mut self) -> IonResult<ValueRef<Self::Symbol>> {
+        (**self).read_value()
+    }
+
     fn read_null(&mut self) -> IonResult<IonType> {
         (**self).read_null()
     }
@@ -95,8 +100,16 @@ impl<R: RawReader + ?Sized> IonReader for Box<R> {
         (**self).read_blob()
     }
 
+    fn read_blob_bytes(&mut self) -> IonResult<&[u8]> {
+        (**self).read_blob_bytes()
+    }
+
     fn read_clob(&mut self) -> IonResult<Clob> {
         (**self).read_clob()
+    }
+
+    fn read_clob_bytes(&mut self) -> IonResult<&[u8]> {
+        (**self).read_clob_bytes()
     }
 
     fn read_timestamp(&mut self) -> IonResult<Timestamp> {

@@ -3,8 +3,10 @@ use crate::text::parent_container::ParentContainer;
 
 use crate::element::iterators::SymbolsIterator;
 use crate::element::{Blob, Clob, Element};
+use crate::types::value_ref::ValueRef;
 use crate::{
-    Decimal, Int, IonError, IonReader, IonResult, IonType, Str, StreamItem, Symbol, Timestamp,
+    Decimal, Int, IonError, IonReader, IonResult, IonType, Str, StreamItem, Symbol,
+    Timestamp,
 };
 use std::fmt::Display;
 use std::mem;
@@ -12,7 +14,7 @@ use std::mem;
 const INITIAL_PARENTS_CAPACITY: usize = 16;
 
 // TODO: Add an IonElementReader trait implementation
-// TODO: once ElementReader trait is removed this can  use the name `ElementReader`
+// TODO: once ElementReader trait is removed this can use the name `ElementReader`
 pub struct ElementStreamReader {
     // Represents the element that will be read using this reader
     element: Option<Element>,
@@ -253,25 +255,29 @@ impl IonReader for ElementStreamReader {
     }
 
     fn read_symbol(&mut self) -> IonResult<Self::Symbol> {
-        self.current_value_as("symbol value", |v| v.as_symbol().map(|i| i.to_owned()))
+        self.current_value_as("symbol value", |v| v.as_symbol().map(|sym| sym.to_owned()))
     }
 
-    fn read_blob(&mut self) -> IonResult<Blob> {
+    fn read_blob_bytes(&mut self) -> IonResult<&[u8]> {
         match self.current_value.as_ref() {
-            Some(element) if element.as_blob().is_some() => {
-                Ok(Blob::from(element.as_blob().unwrap()))
-            }
+            Some(element) if element.as_blob().is_some() => Ok(element.as_blob().unwrap()),
             _ => Err(self.expected("blog value")),
         }
     }
 
-    fn read_clob(&mut self) -> IonResult<Clob> {
+    fn read_clob_bytes(&mut self) -> IonResult<&[u8]> {
         match self.current_value.as_ref() {
-            Some(element) if element.as_clob().is_some() => {
-                Ok(Clob::from(element.as_clob().unwrap()))
-            }
+            Some(element) if element.as_clob().is_some() => Ok(element.as_clob().unwrap()),
             _ => Err(self.expected("clob value")),
         }
+    }
+
+    fn read_blob(&mut self) -> IonResult<Blob> {
+        self.read_blob_bytes().map(Blob::from)
+    }
+
+    fn read_clob(&mut self) -> IonResult<Clob> {
+        self.read_clob_bytes().map(Clob::from)
     }
 
     fn read_timestamp(&mut self) -> IonResult<Timestamp> {
@@ -351,6 +357,28 @@ impl IonReader for ElementStreamReader {
         // An `Element` doesn't have an Ion version associated with it
         // Since `Element`s are an in-memory representation fo Ion data, all versions of 1.x share the same Ion version.
         (1, 0)
+    }
+
+    fn read_value(&mut self) -> IonResult<ValueRef<Self::Symbol>> {
+        let ion_type = match self.current_value.as_ref() {
+            Some(element) => element.ion_type(),
+            None => return illegal_operation("the reader is not currently positioned on a value"),
+        };
+        match ion_type {
+            IonType::Null => self.read_null().map(ValueRef::Null),
+            IonType::Bool => self.read_bool().map(ValueRef::Bool),
+            IonType::Int => self.read_int().map(ValueRef::Int),
+            IonType::Float => self.read_f64().map(ValueRef::Float),
+            IonType::Decimal => self.read_decimal().map(ValueRef::Decimal),
+            IonType::Timestamp => self.read_timestamp().map(ValueRef::Timestamp),
+            IonType::Symbol => self.read_symbol().map(ValueRef::Symbol),
+            IonType::String => self.read_str().map(ValueRef::String),
+            IonType::Clob => self.read_clob_bytes().map(ValueRef::Clob),
+            IonType::Blob => self.read_blob_bytes().map(ValueRef::Blob),
+            IonType::List => Ok(ValueRef::List),
+            IonType::SExp => Ok(ValueRef::SExp),
+            IonType::Struct => Ok(ValueRef::Struct),
+        }
     }
 }
 

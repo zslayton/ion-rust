@@ -12,6 +12,7 @@ use crate::result::{
 };
 use crate::types::integer::IntAccess;
 use crate::types::string::Str;
+use crate::types::value_ref::ValueRef;
 use crate::types::SymbolId;
 use crate::{
     raw_reader::BufferedRawReader, Decimal, Int, IonReader, IonResult, IonType, RawStreamItem,
@@ -517,6 +518,15 @@ impl<A: AsRef<[u8]>> RawBinaryReader<A> {
         Ok((encoded_value, BinaryBuffer::new(bytes)))
     }
 
+    /// If the reader is currently positioned on a string, returns the slice of bytes that represents
+    /// that string's *UNVALIDATED* utf-8 bytes. This method is available for performance optimization
+    /// in scenarios where utf-8 validation may be unnecessary and/or a bottleneck. It is strongly
+    /// recommended that you use [read_str](Self::read_str) unless absolutely necessary.
+    fn read_str_bytes(&mut self) -> IonResult<&[u8]> {
+        let (_encoded_value, bytes) = self.value_and_bytes(IonType::String)?;
+        Ok(bytes)
+    }
+
     /// If the reader is currently positioned on a symbol value, parses that value into a `SymbolId`.
     pub fn read_symbol_id(&mut self) -> IonResult<SymbolId> {
         let (_encoded_value, bytes) = self.value_and_bytes(IonType::Symbol)?;
@@ -541,27 +551,6 @@ impl<A: AsRef<[u8]>> RawBinaryReader<A> {
         } else {
             decoding_error("found a big_uint symbol ID that was too large to fit in a usize")
         }
-    }
-
-    /// If the reader is currently positioned on a string, returns the slice of bytes that represents
-    /// that string's *UNVALIDATED* utf-8 bytes. This method is available for performance optimization
-    /// in scenarios where utf-8 validation may be unnecessary and/or a bottleneck. It is strongly
-    /// recommended that you use [read_str](Self::read_str) unless absolutely necessary.
-    pub fn read_str_bytes(&mut self) -> IonResult<&[u8]> {
-        let (_encoded_value, bytes) = self.value_and_bytes(IonType::String)?;
-        Ok(bytes)
-    }
-
-    /// If the reader is currently positioned on a blob, returns a slice containing its bytes.
-    pub fn read_blob_bytes(&mut self) -> IonResult<&[u8]> {
-        let (_encoded_value, bytes) = self.value_and_bytes(IonType::Blob)?;
-        Ok(bytes)
-    }
-
-    /// If the reader is currently positioned on a clob, returns a slice containing its bytes.
-    pub fn read_clob_bytes(&mut self) -> IonResult<&[u8]> {
-        let (_encoded_value, bytes) = self.value_and_bytes(IonType::Clob)?;
-        Ok(bytes)
     }
 
     pub fn header_length(&self) -> usize {
@@ -838,6 +827,33 @@ impl<A: AsRef<[u8]>> IonReader for RawBinaryReader<A> {
             .unwrap_or(false)
     }
 
+    fn read_value(&mut self) -> IonResult<ValueRef<Self::Symbol>> {
+        let value = match self.encoded_value() {
+            Some(value) => value,
+            None => return illegal_operation("the reader is not currently positioned on a value"),
+        };
+        // TODO: Each helper method below contains its own validation and error handling.
+        //       As an optimization, we can make 'unchecked' versions of these that allow us to
+        //       share common logic, minimizing instructions.
+        match value.header.ion_type {
+            IonType::Null => self.read_null().map(ValueRef::Null),
+            IonType::Bool => self.read_bool().map(ValueRef::Bool),
+            IonType::Int => self.read_int().map(ValueRef::Int),
+            IonType::Float => self.read_f64().map(ValueRef::Float),
+            IonType::Decimal => self.read_decimal().map(ValueRef::Decimal),
+            IonType::Timestamp => self.read_timestamp().map(ValueRef::Timestamp),
+            IonType::Symbol => {
+                illegal_operation("the RawBinaryReader cannot resolve symbol text")
+            }
+            IonType::String => self.read_str().map(ValueRef::String),
+            IonType::Clob => self.read_clob_bytes().map(ValueRef::Clob),
+            IonType::Blob => self.read_blob_bytes().map(ValueRef::Blob),
+            IonType::List => Ok(ValueRef::List),
+            IonType::SExp => Ok(ValueRef::SExp),
+            IonType::Struct => Ok(ValueRef::Struct),
+        }
+    }
+
     fn read_null(&mut self) -> IonResult<IonType> {
         if let Some(value) = self.encoded_value() {
             // If the reader is on a value, the IonType is present.
@@ -953,8 +969,20 @@ impl<A: AsRef<[u8]>> IonReader for RawBinaryReader<A> {
         self.read_blob_bytes().map(Vec::from).map(Blob::from)
     }
 
+    /// If the reader is currently positioned on a blob, returns a slice containing its bytes.
+    fn read_blob_bytes(&mut self) -> IonResult<&[u8]> {
+        let (_encoded_value, bytes) = self.value_and_bytes(IonType::Blob)?;
+        Ok(bytes)
+    }
+
     fn read_clob(&mut self) -> IonResult<Clob> {
         self.read_clob_bytes().map(Vec::from).map(Clob::from)
+    }
+
+    /// If the reader is currently positioned on a clob, returns a slice containing its bytes.
+    fn read_clob_bytes(&mut self) -> IonResult<&[u8]> {
+        let (_encoded_value, bytes) = self.value_and_bytes(IonType::Clob)?;
+        Ok(bytes)
     }
 
     fn read_timestamp(&mut self) -> IonResult<Timestamp> {

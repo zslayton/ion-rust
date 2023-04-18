@@ -9,6 +9,7 @@ pub mod decimal;
 pub mod integer;
 pub mod string;
 pub mod timestamp;
+pub mod value_ref;
 
 use std::fmt;
 
