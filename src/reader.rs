@@ -451,9 +451,7 @@ impl<R: RawReader> IonReader for UserReader<R> {
 
     fn read_value(&mut self) -> IonResult<ValueRef<Self::Symbol>> {
         match self.current() {
-            StreamItem::Nothing => {
-                illegal_operation("the reader is not positioned on a value")
-            }
+            StreamItem::Nothing => illegal_operation("the reader is not positioned on a value"),
             StreamItem::Null(ion_type) => Ok(ValueRef::Null(ion_type)),
             StreamItem::Value(ion_type) => match ion_type {
                 IonType::Null => unreachable!("null is handled in an earlier match arm"),
@@ -587,6 +585,31 @@ mod tests {
         assert_eq!(reader.next()?, Value(IonType::Int));
         assert_eq!(reader.field_name()?, "baz");
 
+        Ok(())
+    }
+
+    #[test]
+    fn read_value() -> IonResult<()> {
+        let ion = "1 true \"hello\" {} [] ()";
+        let mut reader = ReaderBuilder::default().build(ion)?;
+
+        reader.next()?;
+        assert_eq!(reader.read_value()?, ValueRef::Int(1i64.into()));
+
+        reader.next()?;
+        assert_eq!(reader.read_value()?, ValueRef::Bool(true));
+
+        reader.next()?;
+        assert_eq!(reader.read_value()?, ValueRef::String("hello"));
+
+        reader.next()?;
+        assert_eq!(reader.read_value()?, ValueRef::Struct);
+
+        reader.next()?;
+        assert_eq!(reader.read_value()?, ValueRef::List);
+
+        reader.next()?;
+        assert_eq!(reader.read_value()?, ValueRef::SExp);
         Ok(())
     }
 }
