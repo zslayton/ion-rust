@@ -903,18 +903,13 @@ impl<W: Write> IonWriter for RawBinaryWriter<W> {
 
 #[cfg(test)]
 mod writer_tests {
-    use std::fmt::Debug;
-
-    use crate::{ion_seq, RawIonReader, RawStreamItem, StreamItem, ValueRef};
+    use crate::{ion_seq, RawIonReader, ValueRef};
 
     use rstest::*;
 
     use super::*;
     use crate::binary::non_blocking::raw_binary_reader::RawBinaryReader;
     use crate::element::{Blob, Clob, Element, Sequence};
-    use crate::raw_symbol_token::RawSymbolToken;
-    use crate::symbol::Symbol;
-    use crate::IonReader;
     use num_bigint::BigInt;
     use num_traits::Float;
     use std::convert::TryInto;
@@ -1127,12 +1122,12 @@ mod writer_tests {
     #[test]
     fn binary_writer_large_integers() -> IonResult<()> {
         // 11 byte UInt
-        let big_positive = BigInt::from_str("123456789123456789123456789").unwrap();
+        let big_positive = &BigInt::from_str("123456789123456789123456789").unwrap();
         // 19 byte UInt
         let very_big_positive =
-            BigInt::from_str("123456789123456789123456789123456789123456789").unwrap();
-        let big_negative = -big_positive.clone();
-        let very_big_negative = -very_big_positive.clone();
+            &BigInt::from_str("123456789123456789123456789123456789123456789").unwrap();
+        let big_negative = &(-big_positive.clone());
+        let very_big_negative = &(-very_big_positive.clone());
         binary_writer_test(
             |writer| {
                 writer.write_int(&Int::BigInt(BigInt::zero()))?;
@@ -1144,10 +1139,10 @@ mod writer_tests {
             },
             ion_seq!(
                 BigInt::zero()
-                {&big_positive}
-                {&very_big_positive}
-                {&big_negative}
-                {&very_big_negative}
+                big_positive
+                very_big_positive
+                big_negative
+                very_big_negative
             ),
         )
     }

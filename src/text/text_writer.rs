@@ -197,9 +197,6 @@ impl<W: Write> IonWriter for TextWriter<W> {
 mod tests {
     use super::*;
     use crate::element::Element;
-    use crate::reader::ReaderBuilder;
-    use crate::IonReader;
-    use crate::StreamItem::Value;
 
     #[test]
     fn resolve_symbol_ids() -> IonResult<()> {

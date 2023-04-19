@@ -15,8 +15,8 @@ use crate::types::string::Str;
 use crate::types::value_ref::RawValueRef;
 use crate::types::SymbolId;
 use crate::{
-    raw_reader::BufferedRawReader, Decimal, Int, IonReader, IonResult, IonType, RawIonReader,
-    RawStreamItem, RawSymbolToken, RawSymbolTokenRef, Timestamp,
+    raw_reader::BufferedRawReader, Decimal, Int, IonResult, IonType, RawIonReader, RawStreamItem,
+    RawSymbolToken, RawSymbolTokenRef, Timestamp,
 };
 use bytes::{BigEndian, Buf, ByteOrder};
 use num_bigint::BigUint;

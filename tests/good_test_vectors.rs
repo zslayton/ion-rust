@@ -9,7 +9,11 @@ use std::str::FromStr;
 use walkdir::WalkDir;
 
 use ion_rs::result::{decoding_error, IonResult};
-use ion_rs::{IonReader, IonType, Reader, ReaderBuilder};
+use ion_rs::StreamItem::Value;
+use ion_rs::{
+    IonReader, IonType, RawIonReader, Reader, ReaderBuilder, SequenceRef, StructRef, ValueReader,
+    ValueRef,
+};
 
 const GOOD_TEST_FILES_PATH: &str = "ion-tests/iontestdata/good/";
 
@@ -125,52 +129,48 @@ fn read_file(path: &Path) -> IonResult<()> {
 
 // Recursively reads all of the values in the provided Reader, surfacing any errors.
 fn read_all_values(reader: &mut Reader) -> IonResult<()> {
-    // StreamItem::Null conflicts with IonType::Null, so we give them aliases for clarity.
-    use ion_rs::StreamItem::{Null as NullValue, *};
-    use IonType::{Null as NullType, *};
+    while let Value(mut value) = reader.next()? {
+        read_value(&mut value)?;
+    }
+    Ok(())
+}
 
-    while let Value(ion_type) | NullValue(ion_type) = reader.next()? {
-        if reader.is_null() {
-            continue;
+fn read_value<R: RawIonReader>(value_reader: &mut ValueReader<R>) -> IonResult<()> {
+    use crate::ValueRef::*;
+    match value_reader.read()? {
+        Null(_) => {}
+        Bool(_) => {}
+        Int(_) => {}
+        Float(_) => {}
+        Decimal(_) => {}
+        Timestamp(_) => {}
+        String(_) => {}
+        Symbol(_) => {}
+        Blob(_) => {}
+        Clob(_) => {}
+        SExp(mut s) | List(mut s) => {
+            return read_sequence(s);
         }
-        match ion_type {
-            Struct | List | SExp => {
-                reader.step_in()?;
-                read_all_values(reader)?;
-                reader.step_out()?;
-            }
-            String => {
-                let _text = reader.read_string()?;
-            }
-            Symbol => {
-                // The binary reader's tokens are always SIDs
-                let _symbol_id = reader.read_symbol()?;
-            }
-            Int => {
-                let _int = reader.read_i64()?;
-            }
-            Float => {
-                let _float = reader.read_f64()?;
-            }
-            Decimal => {
-                let _decimal = reader.read_decimal()?;
-            }
-            Timestamp => {
-                let _timestamp = reader.read_timestamp()?;
-            }
-            Bool => {
-                let _boolean = reader.read_bool()?;
-            }
-            Blob => {
-                let _blob = reader.read_blob()?;
-            }
-            Clob => {
-                let _clob = reader.read_clob()?;
-            }
-            NullType => {
-                unreachable!("Value with IonType::Null returned is_null=false.");
-            }
+        Struct(mut s) => {
+            return read_struct(s);
         }
     }
     Ok(())
+}
+
+fn read_sequence<R: RawIonReader>(mut sequence_ref: SequenceRef<R>) -> IonResult<()> {
+    let mut sequence_reader = sequence_ref.step_in()?;
+    while let Some(mut value) = sequence_reader.next_element()? {
+        read_value(&mut value)?;
+    }
+    sequence_reader.step_out()
+}
+
+fn read_struct<R: RawIonReader>(mut struct_ref: StructRef<R>) -> IonResult<()> {
+    let mut struct_reader = struct_ref.step_in()?;
+    while let Some(mut field) = struct_reader.next_field()? {
+        field.read_name()?;
+        read_value(&mut field.value())?;
+    }
+    struct_reader.step_out()
 }

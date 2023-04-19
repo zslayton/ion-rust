@@ -1,5 +1,4 @@
 use crate::element::{Blob, Clob};
-use crate::stream_reader::IonReader;
 use crate::types::string::Str;
 use crate::types::value_ref::RawValueRef;
 use crate::types::IonType;

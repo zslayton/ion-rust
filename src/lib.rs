@@ -211,6 +211,8 @@ pub use types::timestamp::Timestamp;
 pub use types::value_ref::ValueRef;
 pub use types::IonType;
 
+pub use value_reader::{SequenceReader, SequenceRef, StructReader, StructRef, ValueReader};
+
 pub use binary::binary_writer::{BinaryWriter, BinaryWriterBuilder};
 pub use text::text_writer::{TextWriter, TextWriterBuilder};
 pub use writer::IonWriter;

@@ -400,12 +400,12 @@ mod impl_display_for_element_tests {
         }
 
         let data = read(file_name).unwrap();
-        let result: IonResult<Vec<Element>> = Element::read_all(data.as_slice());
+        let result: IonResult<Sequence> = Element::read_all(data.as_slice());
         let elements = result.unwrap_or_else(|e| {
             panic!("Expected to be able to read Ion values for contents of file {file_name}: {e:?}")
         });
 
-        for element in elements {
+        for element in &elements {
             let mut buffer = Vec::with_capacity(2048);
             let mut writer = TextWriterBuilder::new().build(&mut buffer).unwrap();
             writer.write_element(&element).unwrap();

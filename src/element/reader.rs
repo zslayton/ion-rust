@@ -5,8 +5,8 @@
 
 use crate::element::{Annotations, Element, Sequence, Struct, Value};
 use crate::result::{decoding_error, IonResult};
-use crate::value_reader::{SequenceReader, SequenceRef, StructRef, ValueReader};
-use crate::{IonReader, RawIonReader, RawStreamItem, StreamItem, UserReader, ValueRef};
+use crate::value_reader::{SequenceRef, StructRef, ValueReader};
+use crate::{IonReader, RawIonReader, StreamItem, UserReader, ValueRef};
 
 /// Reads Ion data into [`Element`] instances.
 ///

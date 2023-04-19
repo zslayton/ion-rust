@@ -1,8 +1,5 @@
-use crate::result::{decoding_error, decoding_error_raw, illegal_operation};
-use crate::types::value_ref::RawValueRef;
 use crate::{
-    IonResult, IonType, RawIonReader, RawStreamItem, RawSymbolToken, RawSymbolTokenRef, Symbol,
-    SymbolRef, SymbolTable, SystemReader, SystemStreamItem, ValueRef,
+    IonResult, IonType, RawIonReader, SymbolRef, SystemReader, SystemStreamItem, ValueRef,
 };
 use std::fmt::{Debug, Formatter};
 
@@ -183,9 +180,4 @@ fn reader_for_next_value<R: RawIonReader>(
             Null(_) | Value(_) => return Ok(Some(ValueReader { reader })),
         }
     }
-}
-
-#[test]
-fn do_it() {
-    let ion = "foo 5 21 [a, false]";
 }

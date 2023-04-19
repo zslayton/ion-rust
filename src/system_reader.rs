@@ -17,9 +17,7 @@ use crate::types::string::Str;
 use crate::types::timestamp::Timestamp;
 use crate::types::value_ref::ValueRef;
 use crate::value_reader::{SequenceRef, StructRef};
-use crate::{
-    BlockingRawBinaryReader, IonReader, IonType, RawSymbolTokenRef, SymbolRef, SymbolTable,
-};
+use crate::{BlockingRawBinaryReader, IonType, RawSymbolTokenRef, SymbolRef, SymbolTable};
 
 /// Tracks where the [SystemReader] is in the process of reading a local symbol table.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]

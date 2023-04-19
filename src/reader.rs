@@ -5,18 +5,14 @@ use std::ops::Range;
 use delegate::delegate;
 
 use crate::binary::constants::v1_0::IVM;
-use crate::constants::v1_0::system_symbol_ids;
 use crate::data_source::ToIonDataSource;
 use crate::raw_reader::{RawIonReader, RawStreamItem};
-use crate::raw_symbol_token::RawSymbolToken;
 use crate::result::{decoding_error, IonResult};
 use crate::stream_reader::IonReader;
 use crate::symbol_table::SymbolTable;
 use crate::types::value_ref::ValueRef;
 use crate::value_reader::ValueReader;
-use crate::{
-    BlockingRawBinaryReader, BlockingRawTextReader, IonType, RawSymbolTokenRef, SystemReader,
-};
+use crate::{BlockingRawBinaryReader, BlockingRawTextReader, SystemReader};
 use std::fmt::{Display, Formatter};
 
 /// Configures and constructs new instances of [Reader].
@@ -189,9 +185,7 @@ impl<R: RawIonReader> IonReader for UserReader<R> {
                     // part of a serialized symbol table. The user reader can ignore this
                     // and move on to the next stream item.
                 }
-                Value(ion_type) | Null(ion_type) => {
-                    return Ok(StreamItem::Value(self.value_reader()))
-                }
+                Value(_) | Null(_) => return Ok(StreamItem::Value(self.value_reader())),
                 Nothing => return Ok(StreamItem::Nothing),
             }
         }
@@ -235,10 +229,9 @@ mod tests {
 
     use super::*;
     use crate::binary::constants::v1_0::IVM;
-    use crate::{BlockingRawBinaryReader, Int, SymbolRef, SystemStreamItem};
+    use crate::{BlockingRawBinaryReader, SymbolRef};
 
     use crate::result::IonResult;
-    use crate::types::IonType;
     use crate::StreamItem::Value;
 
     type TestDataSource = io::Cursor<Vec<u8>>;
@@ -299,7 +292,6 @@ mod tests {
     #[test]
     fn test_read_struct() -> IonResult<()> {
         let mut reader = ion_reader_for(EXAMPLE_STREAM);
-        use crate::Int;
 
         if let Value(mut v) = reader.next()? {
             if let ValueRef::Struct(s) = v.read()? {

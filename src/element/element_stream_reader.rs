@@ -4,11 +4,10 @@ use crate::text::parent_container::ParentContainer;
 use crate::element::iterators::SymbolsIterator;
 use crate::element::{Blob, Clob, Element};
 use crate::raw_symbol_token_ref::AsRawSymbolTokenRef;
-use crate::symbol_ref::AsSymbolRef;
 use crate::types::value_ref::RawValueRef;
 use crate::{
-    Decimal, Int, IonError, IonReader, IonResult, IonType, RawIonReader, RawStreamItem,
-    RawSymbolTokenRef, Str, StreamItem, Symbol, Timestamp,
+    Decimal, Int, IonError, IonResult, IonType, RawIonReader, RawStreamItem, RawSymbolTokenRef,
+    Str, Symbol, Timestamp,
 };
 use std::fmt::Display;
 use std::mem;
@@ -398,7 +397,6 @@ mod reader_tests {
 
     use super::*;
     use crate::result::IonResult;
-    use crate::stream_reader::IonReader;
     use crate::types::decimal::Decimal;
     use crate::types::timestamp::Timestamp;
 
