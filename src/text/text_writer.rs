@@ -196,6 +196,7 @@ impl<W: Write> IonWriter for TextWriter<W> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::element::Element;
     use crate::reader::ReaderBuilder;
     use crate::IonReader;
     use crate::StreamItem::Value;
@@ -216,15 +217,19 @@ mod tests {
         text_writer.step_out()?;
         text_writer.flush()?;
 
-        let mut reader = ReaderBuilder::new().build(text_writer.output().as_slice())?;
-        assert_eq!(Value(IonType::Struct), reader.next()?);
-        reader.step_in()?;
-        assert_eq!(Value(IonType::Symbol), reader.next()?);
-        assert_eq!(1, reader.number_of_annotations());
-        // The reader returns text values for the symbol IDs it encountered in the stream
-        assert_eq!("$ion", reader.annotations().next().unwrap()?);
-        assert_eq!("name", reader.field_name()?);
-        assert_eq!("version", reader.read_symbol()?);
+        let actual = Element::read_all(text_writer.output().as_slice())?;
+        let expected = Element::read_all(r#"{name: $ion::version}"#)?;
+
+        assert_eq!(actual, expected);
+        // let mut reader = ReaderBuilder::new().build(text_writer.output().as_slice())?;
+        // assert_eq!(Value(IonType::Struct), reader.next()?);
+        // reader.step_in()?;
+        // assert_eq!(Value(IonType::Symbol), reader.next()?);
+        // assert_eq!(1, reader.number_of_annotations());
+        // // The reader returns text values for the symbol IDs it encountered in the stream
+        // assert_eq!("$ion", reader.annotations().next().unwrap()?);
+        // assert_eq!("name", reader.field_name()?);
+        // assert_eq!("version", reader.read_symbol()?);
 
         Ok(())
     }

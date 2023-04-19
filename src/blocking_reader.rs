@@ -9,8 +9,8 @@ use crate::result::IonResult;
 use crate::stream_reader::IonReader;
 use crate::text::non_blocking::raw_text_reader::RawTextReader;
 use crate::types::timestamp::Timestamp;
-use crate::types::value_ref::ValueRef;
-use crate::{Decimal, Int, IonError, IonType, Str};
+use crate::types::value_ref::RawValueRef;
+use crate::{Decimal, Int, IonError, IonType, RawIonReader, RawStreamItem, RawSymbolTokenRef, Str};
 
 pub type BlockingRawTextReader<T> = BlockingRawReader<RawTextReader<Vec<u8>>, T>;
 pub type BlockingRawBinaryReader<T> = BlockingRawReader<RawBinaryReader<Vec<u8>>, T>;
@@ -54,15 +54,12 @@ impl<R: BufferedRawReader, T: ToIonDataSource> BlockingRawReader<R, T> {
     }
 }
 
-impl<R: BufferedRawReader, T: ToIonDataSource> IonReader for BlockingRawReader<R, T> {
-    type Item = R::Item;
-    type Symbol = R::Symbol;
-
+impl<R: BufferedRawReader, T: ToIonDataSource> RawIonReader for BlockingRawReader<R, T> {
     fn ion_version(&self) -> (u8, u8) {
         (1, 0)
     }
 
-    fn next(&mut self) -> IonResult<Self::Item> {
+    fn next(&mut self) -> IonResult<RawStreamItem> {
         let mut read_size = self.expected_read_size;
 
         loop {
@@ -90,7 +87,7 @@ impl<R: BufferedRawReader, T: ToIonDataSource> IonReader for BlockingRawReader<R
         }
     }
 
-    fn current(&self) -> Self::Item {
+    fn current(&self) -> RawStreamItem {
         self.reader.current()
     }
 
@@ -102,7 +99,7 @@ impl<R: BufferedRawReader, T: ToIonDataSource> IonReader for BlockingRawReader<R
         self.reader.is_null()
     }
 
-    fn annotations<'a>(&'a self) -> Box<dyn Iterator<Item = IonResult<Self::Symbol>> + 'a> {
+    fn annotations<'a>(&'a self) -> Box<dyn Iterator<Item = IonResult<RawSymbolTokenRef>> + 'a> {
         self.reader.annotations()
     }
 
@@ -114,7 +111,7 @@ impl<R: BufferedRawReader, T: ToIonDataSource> IonReader for BlockingRawReader<R
         self.reader.number_of_annotations()
     }
 
-    fn field_name(&self) -> IonResult<Self::Symbol> {
+    fn field_name(&self) -> IonResult<RawSymbolTokenRef> {
         self.reader.field_name()
     }
 
@@ -154,7 +151,7 @@ impl<R: BufferedRawReader, T: ToIonDataSource> IonReader for BlockingRawReader<R
         self.reader.read_str()
     }
 
-    fn read_symbol(&mut self) -> IonResult<Self::Symbol> {
+    fn read_symbol(&mut self) -> IonResult<RawSymbolTokenRef> {
         self.reader.read_symbol()
     }
 
@@ -197,7 +194,7 @@ impl<R: BufferedRawReader, T: ToIonDataSource> IonReader for BlockingRawReader<R
         self.reader.depth()
     }
 
-    fn read_value(&mut self) -> IonResult<ValueRef<Self::Symbol>> {
+    fn read_value(&mut self) -> IonResult<RawValueRef> {
         self.reader.read_value()
     }
 

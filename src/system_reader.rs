@@ -4,17 +4,22 @@ use std::ops::Range;
 
 use crate::constants::v1_0::{system_symbol_ids, SYSTEM_SYMBOLS};
 use crate::element::{Blob, Clob};
-use crate::raw_reader::{RawReader, RawStreamItem};
+use crate::raw_reader::{RawIonReader, RawStreamItem};
 use crate::raw_symbol_token::RawSymbolToken;
+use crate::raw_symbol_token_ref::AsRawSymbolTokenRef;
 use crate::result::{decoding_error, decoding_error_raw, illegal_operation, IonError, IonResult};
 use crate::symbol::Symbol;
+use crate::symbol_ref::AsSymbolRef;
 use crate::system_reader::LstPosition::*;
 use crate::types::decimal::Decimal;
 use crate::types::integer::Int;
 use crate::types::string::Str;
 use crate::types::timestamp::Timestamp;
 use crate::types::value_ref::ValueRef;
-use crate::{BlockingRawBinaryReader, IonReader, IonType, SymbolTable};
+use crate::value_reader::{SequenceRef, StructRef};
+use crate::{
+    BlockingRawBinaryReader, IonReader, IonType, RawSymbolTokenRef, SymbolRef, SymbolTable,
+};
 
 /// Tracks where the [SystemReader] is in the process of reading a local symbol table.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -126,14 +131,14 @@ impl LstData {
 /// * does NOT filter out encoding data like IVMs and symbol tables
 ///
 /// SystemReader itself is format-agnostic; all format-specific logic is handled by the
-/// wrapped [RawReader] implementation.
+/// wrapped [RawIonReader] implementation.
 ///
 /// If the user skips over some or all of a local symbol table in the stream (via either `next()`
 /// or `step_out()`), the SystemReader will automatically process the rest of the local symbol
 /// table before advancing. This allows users to visit Ion values used to encode local symbol tables
 /// without also being responsible for interpreting them (as they would with an implementation of
-/// the [RawReader] trait.)
-pub struct SystemReader<R: RawReader> {
+/// the [RawIonReader] trait.)
+pub struct SystemReader<R: RawIonReader> {
     raw_reader: R,
     // The current symbol table
     symbol_table: SymbolTable,
@@ -142,7 +147,7 @@ pub struct SystemReader<R: RawReader> {
     current_item: SystemStreamItem,
 }
 
-impl<R: RawReader> SystemReader<R> {
+impl<R: RawIonReader> SystemReader<R> {
     pub fn new(raw_reader: R) -> SystemReader<R> {
         SystemReader {
             raw_reader,
@@ -161,10 +166,11 @@ impl<R: RawReader> SystemReader<R> {
                 .raw_annotations()
                 .next()
                 .map(|a| {
-                    a.matches(
-                        system_symbol_ids::ION_SYMBOL_TABLE,
-                        SYSTEM_SYMBOLS[system_symbol_ids::ION_SYMBOL_TABLE],
-                    )
+                    a.is_ok()
+                        && a.unwrap().as_raw_symbol_token_ref().matches(
+                            system_symbol_ids::ION_SYMBOL_TABLE,
+                            SYSTEM_SYMBOLS[system_symbol_ids::ION_SYMBOL_TABLE],
+                        )
                 })
                 .unwrap_or(false)
     }
@@ -299,6 +305,7 @@ impl<R: RawReader> SystemReader<R> {
                 if self
                     .lst
                     .current_symbol
+                    .as_raw_symbol_token_ref()
                     .matches(system_symbol_ids::ION_SYMBOL_TABLE, "$ion_symbol_table")
                 {
                     self.lst.is_append = true;
@@ -322,7 +329,7 @@ impl<R: RawReader> SystemReader<R> {
     // `self.lst.current_symbol` so it can be returned if the user requests it.
     fn load_current_symbol(&mut self) -> IonResult<()> {
         let token = self.raw_reader.read_symbol()?;
-        self.lst.current_symbol = token;
+        self.lst.current_symbol = token.to_owned();
         Ok(())
     }
 
@@ -353,7 +360,11 @@ impl<R: RawReader> SystemReader<R> {
 
     fn process_ivm(&mut self, major: u8, minor: u8) -> IonResult<SystemStreamItem> {
         if self.depth() > 0 {
-            return decoding_error("Encountered an IVM at a depth > 0");
+            return decoding_error("encountered an IVM at a depth > 0");
+        } else if (major, minor) != (1, 0) {
+            return decoding_error(format!(
+                "Encountered a version marker for v{major}.{minor}, but only v1.0 is supported."
+            ));
         }
 
         self.lst.state = NotReadingAnLst;
@@ -449,18 +460,15 @@ impl<R: RawReader> SystemReader<R> {
         }
     }
 
-    pub fn raw_annotations(&self) -> impl Iterator<Item = RawSymbolToken> + '_ {
-        // RawReader implementations do not attempt to resolve each annotation into text.
-        // Additionally, they perform all I/O related to annotations in their implementations
-        // of Reader::next. As such, it's safe to call `unwrap()` on each raw annotation.
-        self.raw_reader.annotations().map(|a| a.unwrap())
+    pub fn raw_annotations(&self) -> impl Iterator<Item = IonResult<RawSymbolTokenRef>> + '_ {
+        self.raw_reader.annotations()
     }
 
     pub fn symbol_table(&self) -> &SymbolTable {
         &self.symbol_table
     }
 
-    pub fn read_raw_symbol(&mut self) -> IonResult<RawSymbolToken> {
+    pub fn read_raw_symbol(&mut self) -> IonResult<RawSymbolTokenRef> {
         if self.lst.state == AtLstImports
             && self.raw_reader.ion_type() == Some(IonType::Symbol)
             && !self.raw_reader.is_null()
@@ -468,7 +476,7 @@ impl<R: RawReader> SystemReader<R> {
             // The raw reader is at the `imports` field of an LST and its value is a symbol.
             // This means that it has eagerly loaded the symbol to see if it is $ion_symbol_table.
             // Return a copy of the materialized symbol value.
-            return Ok(self.lst.current_symbol.clone());
+            return Ok(self.lst.current_symbol.as_raw_symbol_token_ref());
         }
         // Otherwise, delegate to the raw reader
         if self.raw_reader.current() == RawStreamItem::Nothing {
@@ -477,7 +485,7 @@ impl<R: RawReader> SystemReader<R> {
         self.raw_reader.read_symbol()
     }
 
-    pub fn raw_field_name_token(&mut self) -> IonResult<RawSymbolToken> {
+    pub fn raw_field_name_token(&mut self) -> IonResult<RawSymbolTokenRef> {
         self.raw_reader.field_name()
     }
 
@@ -491,16 +499,11 @@ impl<R: RawReader> SystemReader<R> {
             && self.raw_reader.ion_type() == Some(IonType::String)
             && !self.raw_reader.is_null()
     }
-}
-
-impl<R: RawReader> IonReader for SystemReader<R> {
-    type Item = SystemStreamItem;
-    type Symbol = Symbol;
 
     /// Advances the system reader to the next raw stream element.
     // `next` resembles `Iterator::next()`
     #[allow(clippy::should_implement_trait)]
-    fn next(&mut self) -> IonResult<Self::Item> {
+    pub fn next(&mut self) -> IonResult<SystemStreamItem> {
         // If the reader is positioned at a container that makes up part of an LST, it cannot
         // simply skip it with next(); it must instead descend into that container to read each
         // value.
@@ -519,11 +522,11 @@ impl<R: RawReader> IonReader for SystemReader<R> {
         Ok(item)
     }
 
-    fn current(&self) -> Self::Item {
+    pub fn current(&self) -> SystemStreamItem {
         self.current_item
     }
 
-    fn step_in(&mut self) -> IonResult<()> {
+    pub fn step_in(&mut self) -> IonResult<()> {
         // Try to step in with the raw_reader. If the reader isn't positioned on container,
         // this will return an error.
         self.raw_reader.step_in()?;
@@ -566,7 +569,7 @@ impl<R: RawReader> IonReader for SystemReader<R> {
         Ok(())
     }
 
-    fn step_out(&mut self) -> IonResult<()> {
+    pub fn step_out(&mut self) -> IonResult<()> {
         // If stepping out is successful, we'll apply this new state before returning Ok(())
         let mut new_lst_state = self.lst.state;
 
@@ -604,41 +607,45 @@ impl<R: RawReader> IonReader for SystemReader<R> {
         Ok(())
     }
 
-    fn field_name(&self) -> IonResult<Symbol> {
+    pub fn field_name(&self) -> IonResult<SymbolRef> {
         match self.raw_reader.field_name() {
-            Ok(RawSymbolToken::SymbolId(sid)) => {
-                self.symbol_table.symbol_for(sid).cloned().ok_or_else(|| {
+            Ok(RawSymbolTokenRef::SymbolId(sid)) => self
+                .symbol_table
+                .symbol_for(sid)
+                .map(|s| s.as_symbol_ref())
+                .ok_or_else(|| {
                     decoding_error_raw(format!("encountered field ID with undefined text: ${sid}"))
-                })
-            }
-            Ok(RawSymbolToken::Text(text)) => Ok(Symbol::owned(text)),
+                }),
+            Ok(RawSymbolTokenRef::Text(text)) => Ok(SymbolRef::with_text(text)),
             Err(error) => Err(error),
         }
     }
 
-    fn annotations<'a>(&'a self) -> Box<dyn Iterator<Item = IonResult<Symbol>> + 'a> {
+    pub fn annotations(&self) -> impl Iterator<Item = IonResult<SymbolRef>> + '_ {
         let iter = self
             .raw_reader
             .annotations()
             .map(|raw_token| match raw_token {
                 // If the annotation was a symbol ID, try to resolve it
-                Ok(RawSymbolToken::SymbolId(sid)) => {
-                    self.symbol_table.symbol_for(sid).cloned().ok_or_else(|| {
+                Ok(RawSymbolTokenRef::SymbolId(sid)) => self
+                    .symbol_table
+                    .symbol_for(sid)
+                    .map(|s| s.as_symbol_ref())
+                    .ok_or_else(|| {
                         decoding_error_raw(format!("Found annotation with undefined symbol ${sid}"))
-                    })
-                }
-                // If the annotation was a text literal, turn it into a `Symbol`
-                Ok(RawSymbolToken::Text(text)) => Ok(Symbol::owned(text)),
+                    }),
+                // If the annotation was a text literal, turn it into a `SymbolRef`
+                Ok(RawSymbolTokenRef::Text(text)) => Ok(SymbolRef::with_text(text)),
                 // If the raw reader couldn't provide the annotation, propagate the error
                 Err(error) => Err(error),
             });
-        Box::new(iter)
+        iter
     }
 
-    fn read_symbol(&mut self) -> IonResult<Self::Symbol> {
+    pub fn read_symbol(&mut self) -> IonResult<Symbol> {
         let sid = match self.read_raw_symbol()? {
-            RawSymbolToken::Text(text) => return Ok(Symbol::owned(text)),
-            RawSymbolToken::SymbolId(sid) => sid,
+            RawSymbolTokenRef::Text(text) => return Ok(Symbol::owned(text)),
+            RawSymbolTokenRef::SymbolId(sid) => sid,
         };
         if let Some(symbol) = self.symbol_table.symbol_for(sid) {
             // Make a cheap clone of the Arc<str> in the symbol table
@@ -650,7 +657,7 @@ impl<R: RawReader> IonReader for SystemReader<R> {
         }
     }
 
-    fn read_string(&mut self) -> IonResult<Str> {
+    pub fn read_string(&mut self) -> IonResult<Str> {
         if self.current_string_was_consumed() {
             return Ok(self.lst.current_string.clone().into());
         }
@@ -663,7 +670,7 @@ impl<R: RawReader> IonReader for SystemReader<R> {
         self.raw_reader.read_string()
     }
 
-    fn read_str(&mut self) -> IonResult<&str> {
+    pub fn read_str(&mut self) -> IonResult<&str> {
         if self.current_string_was_consumed() {
             return Ok(&self.lst.current_string);
         }
@@ -682,27 +689,27 @@ impl<R: RawReader> IonReader for SystemReader<R> {
     // be delegated to self.raw_reader directly.
     delegate! {
         to self.raw_reader {
-            fn is_null(&self) -> bool;
-            fn ion_version(&self) -> (u8, u8);
-            fn ion_type(&self) -> Option<IonType>;
-            fn read_null(&mut self) -> IonResult<IonType>;
-            fn read_bool(&mut self) -> IonResult<bool>;
-            fn read_int(&mut self) -> IonResult<Int>;
-            fn read_i64(&mut self) -> IonResult<i64>;
-            fn read_f32(&mut self) -> IonResult<f32>;
-            fn read_f64(&mut self) -> IonResult<f64>;
-            fn read_decimal(&mut self) -> IonResult<Decimal>;
-            fn read_blob(&mut self) -> IonResult<Blob>;
-            fn read_blob_bytes(&mut self) -> IonResult<&[u8]>;
-            fn read_clob(&mut self) -> IonResult<Clob>;
-            fn read_clob_bytes(&mut self) -> IonResult<&[u8]>;
-            fn read_timestamp(&mut self) -> IonResult<Timestamp>;
-            fn depth(&self) -> usize;
-            fn parent_type(&self) -> Option<IonType>;
+            pub fn is_null(&self) -> bool;
+            pub fn ion_version(&self) -> (u8, u8);
+            pub fn ion_type(&self) -> Option<IonType>;
+            pub fn read_null(&mut self) -> IonResult<IonType>;
+            pub fn read_bool(&mut self) -> IonResult<bool>;
+            pub fn read_int(&mut self) -> IonResult<Int>;
+            pub fn read_i64(&mut self) -> IonResult<i64>;
+            pub fn read_f32(&mut self) -> IonResult<f32>;
+            pub fn read_f64(&mut self) -> IonResult<f64>;
+            pub fn read_decimal(&mut self) -> IonResult<Decimal>;
+            pub fn read_blob(&mut self) -> IonResult<Blob>;
+            pub fn read_blob_bytes(&mut self) -> IonResult<&[u8]>;
+            pub fn read_clob(&mut self) -> IonResult<Clob>;
+            pub fn read_clob_bytes(&mut self) -> IonResult<&[u8]>;
+            pub fn read_timestamp(&mut self) -> IonResult<Timestamp>;
+            pub fn depth(&self) -> usize;
+            pub fn parent_type(&self) -> Option<IonType>;
         }
     }
 
-    fn read_value(&mut self) -> IonResult<ValueRef<Self::Symbol>> {
+    pub fn read_value(&mut self) -> IonResult<ValueRef<R>> {
         match self.current_item {
             SystemStreamItem::SymbolTableNull(ion_type) | SystemStreamItem::Null(ion_type) => {
                 Ok(ValueRef::Null(ion_type))
@@ -719,9 +726,9 @@ impl<R: RawReader> IonReader for SystemReader<R> {
                     IonType::String => self.read_str().map(ValueRef::String),
                     IonType::Clob => self.read_clob_bytes().map(ValueRef::Clob),
                     IonType::Blob => self.read_blob_bytes().map(ValueRef::Blob),
-                    IonType::List => Ok(ValueRef::List),
-                    IonType::SExp => Ok(ValueRef::SExp),
-                    IonType::Struct => Ok(ValueRef::Struct),
+                    IonType::List => Ok(ValueRef::List(SequenceRef::new(self))),
+                    IonType::SExp => Ok(ValueRef::SExp(SequenceRef::new(self))),
+                    IonType::Struct => Ok(ValueRef::Struct(StructRef::new(self))),
                 }
             }
             _ => illegal_operation("reader is not currently positioned on a value"),
@@ -910,12 +917,12 @@ mod tests {
 
         // Advance to `imports`, confirm its value is the system symbol "$ion_symbol_table"
         assert_eq!(reader.next()?, SymbolTableValue(IonType::Symbol));
-        assert_eq!(reader.field_name()?, "imports");
+        assert_eq!(reader.field_name()?, SymbolRef::with_text("imports"));
         assert_eq!(reader.read_symbol()?, "$ion_symbol_table".to_string());
 
         // Advance to `symbols`, visit each string in the list
         assert_eq!(reader.next()?, SymbolTableValue(IonType::List));
-        assert_eq!(reader.field_name()?, "symbols");
+        assert_eq!(reader.field_name()?, SymbolRef::with_text("symbols"));
         reader.step_in()?;
         assert_eq!(reader.next()?, SymbolTableValue(IonType::String));
         assert_eq!(reader.read_string()?, "foo");

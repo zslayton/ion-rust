@@ -190,6 +190,7 @@ mod symbol;
 mod symbol_ref;
 mod symbol_table;
 mod system_reader;
+mod value_reader;
 mod writer;
 
 #[doc(inline)]
@@ -216,7 +217,7 @@ pub use writer::IonWriter;
 
 pub use binary::raw_binary_writer::RawBinaryWriter;
 pub use blocking_reader::{BlockingRawBinaryReader, BlockingRawReader, BlockingRawTextReader};
-pub use raw_reader::{RawReader, RawStreamItem};
+pub use raw_reader::{RawIonReader, RawStreamItem};
 pub use reader::StreamItem;
 pub use reader::{Reader, ReaderBuilder, UserReader};
 pub use stream_reader::IonReader;

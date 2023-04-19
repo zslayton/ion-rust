@@ -12,11 +12,11 @@ use crate::result::{
 };
 use crate::types::integer::IntAccess;
 use crate::types::string::Str;
-use crate::types::value_ref::ValueRef;
+use crate::types::value_ref::RawValueRef;
 use crate::types::SymbolId;
 use crate::{
-    raw_reader::BufferedRawReader, Decimal, Int, IonReader, IonResult, IonType, RawStreamItem,
-    RawSymbolToken, Timestamp,
+    raw_reader::BufferedRawReader, Decimal, Int, IonReader, IonResult, IonType, RawIonReader,
+    RawStreamItem, RawSymbolToken, RawSymbolTokenRef, Timestamp,
 };
 use bytes::{BigEndian, Buf, ByteOrder};
 use num_bigint::BigUint;
@@ -424,7 +424,9 @@ impl<A: AsRef<[u8]>> RawBinaryReader<A> {
     /// Creates an iterator that lazily reads the VarUInt symbol IDs in this value's annotations
     /// wrapper. If the reader is not on a value or the current value does not have annotations,
     /// the iterator will be empty.
-    pub fn annotations_iter(&self) -> impl Iterator<Item = IonResult<RawSymbolToken>> + '_ {
+    pub fn annotation_refs_iter(
+        &self,
+    ) -> impl Iterator<Item = IonResult<RawSymbolTokenRef<'_>>> + '_ {
         // If the reader is currently on a value...
         if let ReaderState::OnValue(encoded_value) = &self.state {
             // ...and that value has one or more annotations...
@@ -445,6 +447,14 @@ impl<A: AsRef<[u8]>> RawBinaryReader<A> {
         // If the reader is either not on a value or the current value has no annotations.else
         // Return an iterator over an arbitrary empty slice.
         AnnotationsIterator::new(&self.buffer.bytes()[0..0])
+    }
+
+    pub fn annotations_iter(&self) -> impl Iterator<Item = IonResult<RawSymbolToken>> + '_ {
+        self.annotation_refs_iter()
+            .map(|annotation| match annotation {
+                Ok(token_ref) => Ok(token_ref.to_owned()),
+                Err(e) => Err(e),
+            })
     }
 
     /// If the reader is currently positioned on a value, returns `Some(&value)`.
@@ -698,16 +708,13 @@ impl<A: AsRef<[u8]>> RawBinaryReader<A> {
     }
 }
 
-impl<A: AsRef<[u8]>> IonReader for RawBinaryReader<A> {
-    type Item = RawStreamItem;
-    type Symbol = RawSymbolToken;
-
+impl<A: AsRef<[u8]>> RawIonReader for RawBinaryReader<A> {
     fn ion_version(&self) -> (u8, u8) {
         self.ion_version
     }
 
     #[inline]
-    fn next(&mut self) -> IonResult<Self::Item> {
+    fn next(&mut self) -> IonResult<RawStreamItem> {
         if let ReaderState::WaitingForData(value) = self.state {
             if self.buffer.remaining() < value.total_length() {
                 return incomplete_data_error("ahead to next item", self.buffer.total_consumed());
@@ -779,7 +786,7 @@ impl<A: AsRef<[u8]>> IonReader for RawBinaryReader<A> {
         item_result
     }
 
-    fn current(&self) -> Self::Item {
+    fn current(&self) -> RawStreamItem {
         use ReaderState::*;
         match self.state {
             OnIvm => RawStreamItem::VersionMarker(self.ion_version.0, self.ion_version.1),
@@ -799,8 +806,8 @@ impl<A: AsRef<[u8]>> IonReader for RawBinaryReader<A> {
         self.encoded_value().map(|ev| ev.ion_type())
     }
 
-    fn annotations<'a>(&'a self) -> Box<dyn Iterator<Item = IonResult<Self::Symbol>> + 'a> {
-        Box::new(self.annotations_iter())
+    fn annotations<'a>(&'a self) -> Box<dyn Iterator<Item = IonResult<RawSymbolTokenRef>> + 'a> {
+        Box::new(self.annotation_refs_iter())
     }
 
     fn has_annotations(&self) -> bool {
@@ -809,7 +816,7 @@ impl<A: AsRef<[u8]>> IonReader for RawBinaryReader<A> {
             .unwrap_or(false)
     }
 
-    fn field_name(&self) -> IonResult<Self::Symbol> {
+    fn field_name(&self) -> IonResult<RawSymbolTokenRef> {
         // If the reader is parked on a value...
         self.encoded_value()
             .ok_or_else(|| illegal_operation_raw("the reader is not positioned on a value"))
@@ -817,7 +824,7 @@ impl<A: AsRef<[u8]>> IonReader for RawBinaryReader<A> {
             .and_then(|ev|
                 // ...then convert that field ID into a RawSymbolToken.
                 ev.field_id
-                .map(RawSymbolToken::SymbolId)
+                .map(RawSymbolTokenRef::SymbolId)
                 .ok_or_else(|| illegal_operation_raw("the current value is not inside a struct")))
     }
 
@@ -827,7 +834,7 @@ impl<A: AsRef<[u8]>> IonReader for RawBinaryReader<A> {
             .unwrap_or(false)
     }
 
-    fn read_value(&mut self) -> IonResult<ValueRef<Self::Symbol>> {
+    fn read_value(&mut self) -> IonResult<RawValueRef> {
         let value = match self.encoded_value() {
             Some(value) => value,
             None => return illegal_operation("the reader is not currently positioned on a value"),
@@ -836,21 +843,19 @@ impl<A: AsRef<[u8]>> IonReader for RawBinaryReader<A> {
         //       As an optimization, we can make 'unchecked' versions of these that allow us to
         //       share common logic, minimizing instructions.
         match value.header.ion_type {
-            IonType::Null => self.read_null().map(ValueRef::Null),
-            IonType::Bool => self.read_bool().map(ValueRef::Bool),
-            IonType::Int => self.read_int().map(ValueRef::Int),
-            IonType::Float => self.read_f64().map(ValueRef::Float),
-            IonType::Decimal => self.read_decimal().map(ValueRef::Decimal),
-            IonType::Timestamp => self.read_timestamp().map(ValueRef::Timestamp),
-            IonType::Symbol => {
-                illegal_operation("the RawBinaryReader cannot resolve symbol text")
-            }
-            IonType::String => self.read_str().map(ValueRef::String),
-            IonType::Clob => self.read_clob_bytes().map(ValueRef::Clob),
-            IonType::Blob => self.read_blob_bytes().map(ValueRef::Blob),
-            IonType::List => Ok(ValueRef::List),
-            IonType::SExp => Ok(ValueRef::SExp),
-            IonType::Struct => Ok(ValueRef::Struct),
+            IonType::Null => self.read_null().map(RawValueRef::Null),
+            IonType::Bool => self.read_bool().map(RawValueRef::Bool),
+            IonType::Int => self.read_int().map(RawValueRef::Int),
+            IonType::Float => self.read_f64().map(RawValueRef::Float),
+            IonType::Decimal => self.read_decimal().map(RawValueRef::Decimal),
+            IonType::Timestamp => self.read_timestamp().map(RawValueRef::Timestamp),
+            IonType::Symbol => illegal_operation("the RawBinaryReader cannot resolve symbol text"),
+            IonType::String => self.read_str().map(RawValueRef::String),
+            IonType::Clob => self.read_clob_bytes().map(RawValueRef::Clob),
+            IonType::Blob => self.read_blob_bytes().map(RawValueRef::Blob),
+            IonType::List => Ok(RawValueRef::List),
+            IonType::SExp => Ok(RawValueRef::SExp),
+            IonType::Struct => Ok(RawValueRef::Struct),
         }
     }
 
@@ -961,8 +966,8 @@ impl<A: AsRef<[u8]>> IonReader for RawBinaryReader<A> {
         })
     }
 
-    fn read_symbol(&mut self) -> IonResult<Self::Symbol> {
-        self.read_symbol_id().map(RawSymbolToken::SymbolId)
+    fn read_symbol(&mut self) -> IonResult<RawSymbolTokenRef> {
+        self.read_symbol_id().map(RawSymbolTokenRef::SymbolId)
     }
 
     fn read_blob(&mut self) -> IonResult<Blob> {
@@ -1159,7 +1164,7 @@ impl<'a> AnnotationsIterator<'a> {
 }
 
 impl<'a> Iterator for AnnotationsIterator<'a> {
-    type Item = IonResult<RawSymbolToken>;
+    type Item = IonResult<RawSymbolTokenRef<'a>>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let remaining = self.data.remaining();
@@ -1177,7 +1182,7 @@ impl<'a> Iterator for AnnotationsIterator<'a> {
                 "found an annotation that exceeded the wrapper's declared length",
             ))
         } else {
-            Some(Ok(RawSymbolToken::SymbolId(var_uint.value())))
+            Some(Ok(RawSymbolTokenRef::SymbolId(var_uint.value())))
         }
     }
 }
@@ -1959,7 +1964,7 @@ mod tests {
         expect_value(reader.next(), IonType::Struct);
         reader.step_in()?;
         expect_value(reader.next(), IonType::Bool);
-        assert_eq!(reader.field_name()?, RawSymbolToken::SymbolId(4));
+        assert_eq!(reader.field_name()?, RawSymbolTokenRef::SymbolId(4));
         let item = reader.next()?;
         assert_eq!(item, RawStreamItem::Nothing);
         Ok(())

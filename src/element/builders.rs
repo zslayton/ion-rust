@@ -268,6 +268,25 @@ macro_rules! ion_list {
     }};
 }
 
+/// Constructs an untyped sequence of [`Element`]s.
+///
+/// ```
+/// use ion_rs::ion_sexp;
+/// use ion_rs::element::Element;
+/// // Construct an s-expression Element from Rust values
+/// let actual: Element = ion_sexp!("foo" 7 false ion_sexp!(1.5f64 8.25f64)).into();
+/// // Construct an Element from serialized Ion data
+/// let expected = Element::read_one(r#"("foo" 7 false (1.5e0 8.25e0))"#).unwrap();
+/// // Compare the two Elements
+/// assert_eq!(expected, actual);
+/// ```
+#[macro_export]
+macro_rules! ion_seq {
+    ($($element:expr)*) => {{
+        use $crate::element::Sequence;
+        Sequence::builder()$(.push($element))*.build()
+    }};
+}
 /// Constructs an s-expression [`Element`] with the specified child values.
 ///
 /// ```

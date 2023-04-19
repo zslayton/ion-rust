@@ -203,8 +203,11 @@ impl<W: Write> IonWriter for BinaryWriter<W> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::element::reader::ElementReader;
+    use crate::element::{Element, IntoAnnotatedElement};
     use crate::reader::ReaderBuilder;
     use crate::stream_reader::IonReader;
+    use crate::{ion_struct, Symbol};
 
     use crate::StreamItem::Value;
 
@@ -218,13 +221,9 @@ mod tests {
         binary_writer.step_out()?;
         binary_writer.flush()?;
 
-        let mut reader = ReaderBuilder::new().build(buffer)?;
-        assert_eq!(Value(IonType::Struct), reader.next()?);
-        reader.step_in()?;
-        assert_eq!(Value(IonType::Symbol), reader.next()?);
-        assert_eq!("foo", reader.field_name()?);
-        assert_eq!("bar", reader.read_symbol()?.text_or_error()?);
-
+        let elements = Element::read_all(buffer)?;
+        let expected_elements = Element::read_all(r#"{foo: "bar"}"#)?;
+        assert_eq!(elements, expected_elements);
         Ok(())
     }
 
@@ -236,11 +235,9 @@ mod tests {
         binary_writer.write_i64(5)?;
         binary_writer.flush()?;
 
-        let mut reader = ReaderBuilder::new().build(buffer)?;
-        assert_eq!(Value(IonType::Int), reader.next()?);
-        let mut annotations = reader.annotations();
-        assert_eq!("foo", annotations.next().unwrap()?);
-        assert_eq!("bar", annotations.next().unwrap()?);
+        let elements = Element::read_all(buffer)?;
+        let expected_elements = Element::read_all(r#"foo::bar::5"#)?;
+        assert_eq!(elements, expected_elements);
 
         Ok(())
     }
@@ -254,13 +251,9 @@ mod tests {
         binary_writer.write_symbol("baz")?;
         binary_writer.flush()?;
 
-        let mut reader = ReaderBuilder::new().build(buffer)?;
-        assert_eq!(Value(IonType::Symbol), reader.next()?);
-        assert_eq!("foo", reader.read_symbol()?);
-        assert_eq!(Value(IonType::Symbol), reader.next()?);
-        assert_eq!("bar", reader.read_symbol()?);
-        assert_eq!(Value(IonType::Symbol), reader.next()?);
-        assert_eq!("baz", reader.read_symbol()?);
+        let elements = Element::read_all(buffer)?;
+        let expected_elements = Element::read_all("foo bar baz")?;
+        assert_eq!(elements, expected_elements);
 
         Ok(())
     }

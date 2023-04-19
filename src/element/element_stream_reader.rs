@@ -3,10 +3,12 @@ use crate::text::parent_container::ParentContainer;
 
 use crate::element::iterators::SymbolsIterator;
 use crate::element::{Blob, Clob, Element};
-use crate::types::value_ref::ValueRef;
+use crate::raw_symbol_token_ref::AsRawSymbolTokenRef;
+use crate::symbol_ref::AsSymbolRef;
+use crate::types::value_ref::RawValueRef;
 use crate::{
-    Decimal, Int, IonError, IonReader, IonResult, IonType, Str, StreamItem, Symbol,
-    Timestamp,
+    Decimal, Int, IonError, IonReader, IonResult, IonType, RawIonReader, RawStreamItem,
+    RawSymbolTokenRef, Str, StreamItem, Symbol, Timestamp,
 };
 use std::fmt::Display;
 use std::mem;
@@ -143,11 +145,8 @@ impl ElementStreamReader {
     }
 }
 
-impl IonReader for ElementStreamReader {
-    type Item = StreamItem;
-    type Symbol = Symbol;
-
-    fn next(&mut self) -> IonResult<StreamItem> {
+impl RawIonReader for ElementStreamReader {
+    fn next(&mut self) -> IonResult<RawStreamItem> {
         // Parse the next value from the stream, storing it in `self.current_value`.
         self.load_next_value()?;
 
@@ -155,11 +154,14 @@ impl IonReader for ElementStreamReader {
         Ok(self.current())
     }
 
-    fn current(&self) -> StreamItem {
+    fn current(&self) -> RawStreamItem {
         if let Some(ref value) = self.current_value {
-            StreamItem::nullable_value(value.ion_type(), value.is_null())
+            if value.is_null() {
+                return RawStreamItem::Null(value.ion_type());
+            }
+            RawStreamItem::Value(value.ion_type())
         } else {
-            StreamItem::Nothing
+            RawStreamItem::Nothing
         }
     }
 
@@ -177,22 +179,26 @@ impl IonReader for ElementStreamReader {
     // Clippy reports a redundant closure, but fixing it causes the code to break.
     // See: https://github.com/amazon-ion/ion-rust/issues/472
     #[allow(clippy::redundant_closure)]
-    fn annotations<'a>(&'a self) -> Box<dyn Iterator<Item = IonResult<Self::Symbol>> + 'a> {
+    fn annotations<'a>(
+        &'a self,
+    ) -> Box<dyn Iterator<Item = IonResult<RawSymbolTokenRef<'a>>> + 'a> {
         let iterator = self
             .current_value
             .as_ref()
             .map(|value| value.annotations().into_iter())
             .unwrap_or_else(|| SymbolsIterator::empty())
-            .cloned()
+            // The annotation is a fully resolved symbol, but this is an implementation of
+            // RawIonReader, so we need to treat it as though it were a symbol with inline text.
+            .map(|s| s.as_raw_symbol_token_ref())
             // The annotations are already in memory and are already resolved to text, so
             // this step cannot fail. Map each token to Ok(token).
             .map(Ok);
         Box::new(iterator)
     }
 
-    fn field_name(&self) -> IonResult<Self::Symbol> {
+    fn field_name(&self) -> IonResult<RawSymbolTokenRef> {
         match self.current_field_name.as_ref() {
-            Some(name) => Ok(name.clone()),
+            Some(name) => Ok(name.as_raw_symbol_token_ref()),
             None => illegal_operation(
                 "field_name() can only be called when the reader is positioned inside a struct",
             ),
@@ -254,8 +260,12 @@ impl IonReader for ElementStreamReader {
         }
     }
 
-    fn read_symbol(&mut self) -> IonResult<Self::Symbol> {
-        self.current_value_as("symbol value", |v| v.as_symbol().map(|sym| sym.to_owned()))
+    fn read_symbol(&mut self) -> IonResult<RawSymbolTokenRef> {
+        if let Some(symbol) = self.current_value.as_ref().and_then(|e| e.as_symbol()) {
+            Ok(symbol.as_raw_symbol_token_ref())
+        } else {
+            Err(self.expected("symbol value"))
+        }
     }
 
     fn read_blob_bytes(&mut self) -> IonResult<&[u8]> {
@@ -322,7 +332,7 @@ impl IonReader for ElementStreamReader {
 
         // If we're not at the end of the current container, advance the cursor until we are.
         if !parent.is_exhausted() {
-            while let StreamItem::Value(_) | StreamItem::Null(_) = self.next()? {}
+            while let RawStreamItem::Value(_) | RawStreamItem::Null(_) = self.next()? {}
         }
 
         // Remove the parent container from the stack and clear the current value.
@@ -359,25 +369,25 @@ impl IonReader for ElementStreamReader {
         (1, 0)
     }
 
-    fn read_value(&mut self) -> IonResult<ValueRef<Self::Symbol>> {
+    fn read_value(&mut self) -> IonResult<RawValueRef> {
         let ion_type = match self.current_value.as_ref() {
             Some(element) => element.ion_type(),
             None => return illegal_operation("the reader is not currently positioned on a value"),
         };
         match ion_type {
-            IonType::Null => self.read_null().map(ValueRef::Null),
-            IonType::Bool => self.read_bool().map(ValueRef::Bool),
-            IonType::Int => self.read_int().map(ValueRef::Int),
-            IonType::Float => self.read_f64().map(ValueRef::Float),
-            IonType::Decimal => self.read_decimal().map(ValueRef::Decimal),
-            IonType::Timestamp => self.read_timestamp().map(ValueRef::Timestamp),
-            IonType::Symbol => self.read_symbol().map(ValueRef::Symbol),
-            IonType::String => self.read_str().map(ValueRef::String),
-            IonType::Clob => self.read_clob_bytes().map(ValueRef::Clob),
-            IonType::Blob => self.read_blob_bytes().map(ValueRef::Blob),
-            IonType::List => Ok(ValueRef::List),
-            IonType::SExp => Ok(ValueRef::SExp),
-            IonType::Struct => Ok(ValueRef::Struct),
+            IonType::Null => self.read_null().map(RawValueRef::Null),
+            IonType::Bool => self.read_bool().map(RawValueRef::Bool),
+            IonType::Int => self.read_int().map(RawValueRef::Int),
+            IonType::Float => self.read_f64().map(RawValueRef::Float),
+            IonType::Decimal => self.read_decimal().map(RawValueRef::Decimal),
+            IonType::Timestamp => self.read_timestamp().map(RawValueRef::Timestamp),
+            IonType::Symbol => self.read_symbol().map(RawValueRef::Symbol),
+            IonType::String => self.read_str().map(RawValueRef::String),
+            IonType::Clob => self.read_clob_bytes().map(RawValueRef::Clob),
+            IonType::Blob => self.read_blob_bytes().map(RawValueRef::Blob),
+            IonType::List => Ok(RawValueRef::List),
+            IonType::SExp => Ok(RawValueRef::SExp),
+            IonType::Struct => Ok(RawValueRef::Struct),
         }
     }
 }
@@ -401,7 +411,7 @@ mod reader_tests {
     fn next_type(reader: &mut ElementStreamReader, ion_type: IonType, is_null: bool) {
         assert_eq!(
             reader.next().unwrap(),
-            StreamItem::nullable_value(ion_type, is_null)
+            RawStreamItem::nullable_value(ion_type, is_null)
         );
     }
 
@@ -421,7 +431,7 @@ mod reader_tests {
         reader.step_out()?;
         // This should skip 2, 3 and reach end of the element
         // Asking for next here should result in `Nothing`
-        assert_eq!(reader.next()?, StreamItem::Nothing);
+        assert_eq!(reader.next()?, RawStreamItem::Nothing);
         Ok(())
     }
 
@@ -486,14 +496,14 @@ mod reader_tests {
         next_type(reader, IonType::Struct, false);
         reader.step_in()?;
         next_type(reader, IonType::Int, false);
-        assert_eq!(reader.field_name()?, Symbol::owned("foo"));
+        assert_eq!(reader.field_name()?, RawSymbolTokenRef::Text("foo"));
         next_type(reader, IonType::Struct, false);
-        assert_eq!(reader.field_name()?, Symbol::owned("bar"));
+        assert_eq!(reader.field_name()?, RawSymbolTokenRef::Text("bar"));
         reader.step_in()?;
         next_type(reader, IonType::Int, false);
         assert_eq!(reader.read_i64()?, 5);
         reader.step_out()?;
-        assert_eq!(reader.next()?, StreamItem::Nothing);
+        assert_eq!(reader.next()?, RawStreamItem::Nothing);
         reader.step_out()?;
         Ok(())
     }
@@ -523,7 +533,7 @@ mod reader_tests {
             Timestamp::with_ymd(2007, 7, 12).build().unwrap()
         );
         next_type(reader, IonType::Symbol, false);
-        assert_eq!(reader.read_symbol()?, Symbol::owned("foo"));
+        assert_eq!(reader.read_symbol()?, RawSymbolTokenRef::Text("foo"));
         next_type(reader, IonType::String, false);
         assert_eq!(reader.read_string()?, "hi!".to_string());
         reader.step_out()?;
@@ -579,8 +589,8 @@ mod reader_tests {
         // check if both the elements are equal, this also considers annotations equality
         assert_eq!(actual_element.unwrap(), expected_element);
 
-        // verify if the annotations are read without error
-        let reader_annotations: IonResult<Vec<Symbol>> = reader.annotations().collect();
+        // verify that the annotations are read without error
+        let reader_annotations: IonResult<Vec<RawSymbolTokenRef>> = reader.annotations().collect();
         assert!(reader_annotations.is_ok());
     }
 
@@ -596,20 +606,20 @@ mod reader_tests {
         "#,
         );
         let mut reader = ElementStreamReader::new(pretty_ion);
-        assert_eq!(reader.next()?, StreamItem::Value(IonType::SExp));
+        assert_eq!(reader.next()?, RawStreamItem::Value(IonType::SExp));
         reader.step_in()?;
-        assert_eq!(reader.next()?, StreamItem::Value(IonType::Struct));
+        assert_eq!(reader.next()?, RawStreamItem::Value(IonType::Struct));
 
         reader.step_in()?;
-        assert_eq!(reader.next()?, StreamItem::Value(IonType::Int));
-        assert_eq!(reader.field_name()?, Symbol::owned("a".to_string()));
+        assert_eq!(reader.next()?, RawStreamItem::Value(IonType::Int));
+        assert_eq!(reader.field_name()?, RawSymbolTokenRef::Text("a"));
         assert_eq!(reader.read_i64()?, 1);
-        assert_eq!(reader.next()?, StreamItem::Value(IonType::Int));
-        assert_eq!(reader.field_name()?, Symbol::owned("b".to_string()));
+        assert_eq!(reader.next()?, RawStreamItem::Value(IonType::Int));
+        assert_eq!(reader.field_name()?, RawSymbolTokenRef::Text("b"));
         assert_eq!(reader.read_i64()?, 2);
         reader.step_out()?;
 
-        assert_eq!(reader.next()?, StreamItem::Value(IonType::Struct));
+        assert_eq!(reader.next()?, RawStreamItem::Value(IonType::Struct));
         reader.step_out()?;
         Ok(())
     }

@@ -101,6 +101,16 @@ impl Display for Value {
     }
 }
 
+impl<'a, T, U> From<&'a T> for Value
+where
+    T: ToOwned<Owned = U>,
+    U: Into<Value>,
+{
+    fn from(value: &'a T) -> Self {
+        value.to_owned().into()
+    }
+}
+
 impl From<IonType> for Value {
     fn from(ion_type: IonType) -> Self {
         Value::Null(ion_type)
@@ -488,9 +498,11 @@ impl Element {
     ///
     /// If the input has valid data, returns `Ok(Vec<Element>)`.
     /// If the input has invalid data, returns `Err(IonError)`.
-    pub fn read_all<A: AsRef<[u8]>>(data: A) -> IonResult<Vec<Element>> {
+    pub fn read_all<A: AsRef<[u8]>>(data: A) -> IonResult<Sequence> {
         let bytes: &[u8] = data.as_ref();
-        ReaderBuilder::default().build(bytes)?.elements().collect()
+        let elements: IonResult<Vec<Element>> =
+            ReaderBuilder::default().build(bytes)?.elements().collect();
+        Ok(elements?.into())
     }
 }
 

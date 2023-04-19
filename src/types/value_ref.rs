@@ -1,8 +1,10 @@
-use crate::{Decimal, Int, IonType, Timestamp};
+use crate::value_reader::{SequenceRef, StructRef};
+use crate::{Decimal, Int, IonType, RawIonReader, RawSymbolTokenRef, Symbol, Timestamp};
 
-// Variants whose corresponding type implements `Copy` do not have a `&`.
-#[derive(Debug, Clone, PartialEq)]
-pub enum ValueRef<'a, S> {
+// As RawValueRef represents a reference to a value in the streaming APIs, the container variants
+// simply indicate their Ion type. To access their nested data, the reader would need to step in.
+#[derive(Debug, PartialEq)]
+pub enum RawValueRef<'a> {
     Null(IonType),
     Bool(bool),
     Int(Int),
@@ -10,7 +12,7 @@ pub enum ValueRef<'a, S> {
     Decimal(Decimal),
     Timestamp(Timestamp),
     String(&'a str),
-    Symbol(S),
+    Symbol(RawSymbolTokenRef<'a>),
     Blob(&'a [u8]),
     Clob(&'a [u8]),
     // As ValueRef represents a reference to a value in the streaming APIs, the container variants
@@ -18,4 +20,23 @@ pub enum ValueRef<'a, S> {
     SExp,
     List,
     Struct,
+}
+
+#[derive(Debug)]
+pub enum ValueRef<'a, R: RawIonReader> {
+    Null(IonType),
+    Bool(bool),
+    Int(Int),
+    Float(f64),
+    Decimal(Decimal),
+    Timestamp(Timestamp),
+    String(&'a str),
+    Symbol(Symbol),
+    Blob(&'a [u8]),
+    Clob(&'a [u8]),
+    // As ValueRef represents a reference to a value in the streaming APIs, the container variants
+    // simply indicate their Ion type. To access their nested data, the reader would need to step in.
+    SExp(SequenceRef<'a, R>),
+    List(SequenceRef<'a, R>),
+    Struct(StructRef<'a, R>),
 }

@@ -1,8 +1,8 @@
-use crate::raw_symbol_token::{local_sid_token, text_token};
 use crate::text::parse_result::{IonParseError, IonParseResult, OrFatalParseError, UpgradeIResult};
 use crate::text::parsers::stop_character;
 use crate::text::parsers::text_support::{escaped_char, escaped_newline, StringFragment};
 use crate::text::text_value::TextValue;
+use crate::RawSymbolToken;
 use nom::branch::alt;
 use nom::bytes::streaming::tag;
 use nom::bytes::streaming::{is_a, is_not};
@@ -23,7 +23,7 @@ pub(crate) fn parse_symbol(input: &str) -> IonParseResult<TextValue> {
 fn quoted_symbol(input: &str) -> IonParseResult<TextValue> {
     map(
         delimited(char('\''), quoted_symbol_body, char('\'')),
-        |text| TextValue::Symbol(text_token(text)),
+        |text| TextValue::Symbol(RawSymbolToken::from(text)),
     )(input)
 }
 
@@ -78,7 +78,10 @@ fn identifier(input: &str) -> IonParseResult<TextValue> {
         // Finding a keyword is not a fatal error, it just means that this parser doesn't match.
         return Err(Err::Error(IonParseError::new(input)));
     }
-    Ok((remaining, TextValue::Symbol(text_token(identifier_text))))
+    Ok((
+        remaining,
+        TextValue::Symbol(RawSymbolToken::from(identifier_text)),
+    ))
 }
 
 /// Matches any character that can appear at the start of an identifier.
@@ -109,7 +112,10 @@ pub(crate) fn parse_operator(input: &str) -> IonParseResult<TextValue> {
     // top_level_stream_value parser takes care of this. However, operators can't appear at the top
     // level and so must fend for themselves.
     let recognizer = preceded(multispace0, is_a("!#%&*+-./;<=>?@^`|~"));
-    map(recognizer, |op_text| TextValue::Symbol(text_token(op_text)))(input).upgrade()
+    map(recognizer, |op_text| {
+        TextValue::Symbol(RawSymbolToken::from(op_text))
+    })(input)
+    .upgrade()
 }
 
 /// Matches a symbol ID in the format `$ID` (For example, `$0` or `$42`.)
@@ -136,14 +142,13 @@ fn symbol_id(input: &str) -> IonParseResult<TextValue> {
     const RADIX: u32 = 10;
     let symbol = i64::from_str_radix(symbol_id_text, RADIX)
         .or_fatal_parse_error(input, "could not parse symbol ID")
-        .map(|(_, i)| TextValue::Symbol(local_sid_token(i as SymbolId)))?;
+        .map(|(_, i)| TextValue::Symbol(RawSymbolToken::from(i as SymbolId)))?;
     Ok((remaining, symbol))
 }
 
 #[cfg(test)]
 mod symbol_parsing_tests {
     use super::*;
-    use crate::raw_symbol_token::local_sid_token;
     use crate::text::parsers::unit_test_support::{parse_test_err, parse_test_ok};
     use crate::types::SymbolId;
     use rstest::*;
@@ -151,7 +156,11 @@ mod symbol_parsing_tests {
     // Asserts that when parsed, the provided text produces a TextValue::Symbol
     // that contains the expected text.
     fn parse_equals(text: &str, expected: &str) {
-        parse_test_ok(parse_symbol, text, TextValue::Symbol(text_token(expected)))
+        parse_test_ok(
+            parse_symbol,
+            text,
+            TextValue::Symbol(RawSymbolToken::from(expected)),
+        )
     }
 
     // Asserts that when parsed, the provided text produces a TextValue::Symbol
@@ -160,7 +169,7 @@ mod symbol_parsing_tests {
         parse_test_ok(
             symbol_id,
             text,
-            TextValue::Symbol(local_sid_token(expected)),
+            TextValue::Symbol(RawSymbolToken::from(expected)),
         )
     }
 
@@ -238,17 +247,25 @@ mod symbol_parsing_tests {
         parse_test_ok(
             parse_operator,
             text,
-            TextValue::Symbol(text_token(expected)),
+            TextValue::Symbol(RawSymbolToken::from(expected)),
         )
     }
 
     #[test]
     fn operators_and_negative_numbers() {
-        parse_test_ok(parse_operator, "--3", TextValue::Symbol(text_token("--")));
+        parse_test_ok(
+            parse_operator,
+            "--3",
+            TextValue::Symbol(RawSymbolToken::from("--")),
+        );
     }
 
     #[test]
     fn operators_adjacent_to_sexp() {
-        parse_test_ok(parse_operator, "+(2)-", TextValue::Symbol(text_token("+")));
+        parse_test_ok(
+            parse_operator,
+            "+(2)-",
+            TextValue::Symbol(RawSymbolToken::from("+")),
+        );
     }
 }

@@ -134,6 +134,7 @@ where
 #[cfg(test)]
 mod binary_timestamp_tests {
     use super::*;
+    use crate::element::Element;
     use crate::reader;
     use crate::IonReader;
     use crate::IonType;
@@ -153,19 +154,13 @@ mod binary_timestamp_tests {
         #[case] input: &str,
         #[case] expected: usize,
     ) -> IonResult<()> {
-        let mut reader = ReaderBuilder::new().build(input).unwrap();
-        match reader.next().unwrap() {
-            reader::StreamItem::Value(IonType::Timestamp) => {
-                let timestamp = reader.read_timestamp().unwrap();
-                let mut buf = vec![];
-                let written = buf.encode_timestamp_value(&timestamp)?;
-                assert_eq!(buf.len(), expected);
-                assert_eq!(written, expected);
-            }
-            _ => panic!(
-                "reader.next() should only return reader::StreamItem::Value(IonType::Timestamp)"
-            ),
-        }
+        let element = Element::read_one(input)?;
+        let timestamp = element.as_timestamp().expect("found a non-timestamp");
+
+        let mut buf = vec![];
+        let written = buf.encode_timestamp_value(timestamp)?;
+        assert_eq!(buf.len(), expected);
+        assert_eq!(written, expected);
         Ok(())
     }
 }

@@ -11,14 +11,6 @@ pub enum RawSymbolToken {
 }
 
 impl RawSymbolToken {
-    pub fn matches(&self, sid: SymbolId, text: &str) -> bool {
-        match self {
-            RawSymbolToken::SymbolId(s) if *s == sid => true,
-            RawSymbolToken::Text(t) if t == text => true,
-            _ => false,
-        }
-    }
-
     pub fn local_sid(&self) -> Option<SymbolId> {
         match self {
             RawSymbolToken::SymbolId(s) => Some(*s),
@@ -32,20 +24,6 @@ impl RawSymbolToken {
             RawSymbolToken::Text(t) => Some(t.as_str()),
         }
     }
-}
-
-/// Constructs an [`OwnedSymbolToken`] with unknown text and a local ID.
-/// A common case for binary parsing (though technically relevant in text).
-#[inline]
-pub fn local_sid_token(local_sid: SymbolId) -> RawSymbolToken {
-    RawSymbolToken::SymbolId(local_sid)
-}
-
-/// Constructs an [`OwnedSymbolToken`] with just text.
-/// A common case for text and synthesizing tokens.
-#[inline]
-pub fn text_token<T: Into<String>>(text: T) -> RawSymbolToken {
-    RawSymbolToken::Text(text.into())
 }
 
 impl From<SymbolId> for RawSymbolToken {

@@ -1,7 +1,7 @@
 use ion_rs::binary::non_blocking::raw_binary_reader::RawBinaryReader;
 use ion_rs::raw_reader::RawStreamItem;
 use ion_rs::result::IonResult;
-use ion_rs::RawReader;
+use ion_rs::RawIonReader;
 use ion_rs::{BlockingRawBinaryReader, IonType};
 use memmap::MmapOptions;
 use std::fs::File;
@@ -46,7 +46,7 @@ fn main() -> IonResult<()> {
 
 // Visits each value in the stream recursively, reading each scalar into a native Rust type.
 // Prints the total number of values read upon completion.
-fn read_all_values<R: RawReader>(reader: &mut R) -> IonResult<usize> {
+fn read_all_values<R: RawIonReader>(reader: &mut R) -> IonResult<usize> {
     use IonType::*;
     use RawStreamItem::{Nothing, Null as NullValue, Value, VersionMarker};
     let mut count: usize = 0;

@@ -86,7 +86,7 @@ pub(crate) fn ion_version_marker(input: &str) -> IonParseResult<(u32, u32)> {
 mod parse_top_level_values_tests {
     use rstest::*;
 
-    use crate::raw_symbol_token::{text_token, RawSymbolToken};
+    use crate::raw_symbol_token::RawSymbolToken;
     use crate::text::parsers::unit_test_support::{parse_test_err, parse_test_ok, parse_unwrap};
     use crate::text::parsers::value::value;
     use crate::text::text_value::TextValue;
@@ -97,7 +97,7 @@ mod parse_top_level_values_tests {
 
     // Unit test helper; converts strings into OwnedSymbolTokens
     fn text_tokens(strs: &[&str]) -> Vec<RawSymbolToken> {
-        return strs.iter().map(|s| text_token(*s)).collect();
+        return strs.iter().map(RawSymbolToken::from).collect();
     }
 
     #[test]
@@ -143,8 +143,8 @@ mod parse_top_level_values_tests {
     //     foo::bar::baz END
     // can easily tell that 'foo' and 'bar' are annotations and 'baz' is the value.
     // Here, 'END' is simply an unrelated symbol value that the parser knows to ignore.
-    #[case("foo::bar::baz END", &["foo", "bar"], TextValue::Symbol(text_token("baz")))]
-    #[case("foo::bar::baz END", &["foo", "bar"], TextValue::Symbol(text_token("baz")))]
+    #[case("foo::bar::baz END", &["foo", "bar"], TextValue::Symbol(RawSymbolToken::from("baz")))]
+    #[case("foo::bar::baz END", &["foo", "bar"], TextValue::Symbol(RawSymbolToken::from("baz")))]
     #[case("foo::'bar'::7 END", &["foo", "bar"], TextValue::Int(Int::I64(7)))]
     #[case("'foo'::'bar'::{ END", &["foo", "bar"], TextValue::StructStart)]
     #[case("'foo bar'::false END", &["foo bar"], TextValue::Bool(false))]

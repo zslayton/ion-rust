@@ -229,7 +229,6 @@ pub(crate) fn struct_delimiter(input: &str) -> IonParseResult<()> {
 mod container_parsing_tests {
     use rstest::*;
 
-    use crate::raw_symbol_token::{local_sid_token, text_token};
     use crate::text::parsers::unit_test_support::{parse_test_err, parse_test_ok};
     use crate::text::text_value::TextValue;
     use crate::types::decimal::Decimal;
@@ -259,8 +258,8 @@ mod container_parsing_tests {
     #[rstest]
     #[case("5,", TextValue::Int(Int::I64(5)).without_annotations())]
     #[case("foo::bar::5,", TextValue::Int(Int::I64(5)).with_annotations(["foo", "bar"]))]
-    #[case("foo::bar,", TextValue::Symbol(text_token("bar")).with_annotations("foo"))]
-    #[case("bar]", TextValue::Symbol(text_token("bar")).without_annotations())]
+    #[case("foo::bar,", TextValue::Symbol(RawSymbolToken::from("bar")).with_annotations("foo"))]
+    #[case("bar]", TextValue::Symbol(RawSymbolToken::from("bar")).without_annotations())]
     #[case("7.]", TextValue::Decimal(Decimal::new(7, 0)).without_annotations())]
     #[should_panic]
     //       v---- Missing trailing , or ]
@@ -273,8 +272,8 @@ mod container_parsing_tests {
     }
 
     #[rstest]
-    #[case("'++',", Some(TextValue::Symbol(text_token("++")).without_annotations()))]
-    #[case("foo::'++',", Some(TextValue::Symbol(text_token("++")).with_annotations("foo")))]
+    #[case("'++',", Some(TextValue::Symbol(RawSymbolToken::from("++")).without_annotations()))]
+    #[case("foo::'++',", Some(TextValue::Symbol(RawSymbolToken::from("++")).with_annotations("foo")))]
     #[case("5    ,", Some(TextValue::Int(Int::I64(5)).without_annotations()))]
     #[case("5]", Some(TextValue::Int(Int::I64(5)).without_annotations()))]
     #[case("]", None)]
@@ -288,14 +287,14 @@ mod container_parsing_tests {
     }
 
     #[rstest]
-    #[case("++ ", TextValue::Symbol(text_token("++")).without_annotations())]
-    #[case("foo::++ ", TextValue::Symbol(text_token("++")).with_annotations("foo"))]
+    #[case("++ ", TextValue::Symbol(RawSymbolToken::from("++")).without_annotations())]
+    #[case("foo::++ ", TextValue::Symbol(RawSymbolToken::from("++")).with_annotations("foo"))]
     #[case("5 ", TextValue::Int(Int::I64(5)).without_annotations())]
     #[case("5)", TextValue::Int(Int::I64(5)).without_annotations())]
     #[case("foo::bar::5 ", TextValue::Int(Int::I64(5)).with_annotations(["foo", "bar"]))]
     //               v--- This zero allows the parser to tell that the previous value is complete.
-    #[case("foo::bar 0", TextValue::Symbol(text_token("bar")).with_annotations("foo"))]
-    #[case("bar)", TextValue::Symbol(text_token("bar")).without_annotations())]
+    #[case("foo::bar 0", TextValue::Symbol(RawSymbolToken::from("bar")).with_annotations("foo"))]
+    #[case("bar)", TextValue::Symbol(RawSymbolToken::from("bar")).without_annotations())]
     #[case("7.)", TextValue::Decimal(Decimal::new(7, 0)).without_annotations())]
     #[should_panic]
     //       v---- Comma instead of whitespace
@@ -308,8 +307,8 @@ mod container_parsing_tests {
     }
 
     #[rstest]
-    #[case("++ ", Some(TextValue::Symbol(text_token("++")).without_annotations()))]
-    #[case("foo::++ ", Some(TextValue::Symbol(text_token("++")).with_annotations("foo")))]
+    #[case("++ ", Some(TextValue::Symbol(RawSymbolToken::from("++")).without_annotations()))]
+    #[case("foo::++ ", Some(TextValue::Symbol(RawSymbolToken::from("++")).with_annotations("foo")))]
     #[case("5 ", Some(TextValue::Int(Int::I64(5)).without_annotations()))]
     #[case(")", None)]
     #[case("  )", None)]
@@ -325,8 +324,8 @@ mod container_parsing_tests {
     #[case("5,", TextValue::Int(Int::I64(5)).without_annotations())]
     #[case("5  ,", TextValue::Int(Int::I64(5)).without_annotations())]
     #[case("foo::bar::5,", TextValue::Int(Int::I64(5)).with_annotations(["foo", "bar"]))]
-    #[case("foo::bar,", TextValue::Symbol(text_token("bar")).with_annotations("foo"))]
-    #[case("bar}", TextValue::Symbol(text_token("bar")).without_annotations())]
+    #[case("foo::bar,", TextValue::Symbol(RawSymbolToken::from("bar")).with_annotations("foo"))]
+    #[case("bar}", TextValue::Symbol(RawSymbolToken::from("bar")).without_annotations())]
     #[case("7.}", TextValue::Decimal(Decimal::new(7, 0)).without_annotations())]
     #[should_panic]
     //       v---- Missing trailing , or }
@@ -339,26 +338,26 @@ mod container_parsing_tests {
     }
 
     #[rstest]
-    #[case("foo:", text_token("foo"))]
-    #[case("  foo  :", text_token("foo"))]
-    #[case(
-        "/* Here's a field name */  foo // And here's a delimiter\n:",
-        text_token("foo")
-    )]
-    #[case("'foo':", text_token("foo"))]
-    #[case("  'foo'  :", text_token("foo"))]
-    #[case("$10:", local_sid_token(10))]
-    #[case("  $10  :", local_sid_token(10))]
-    #[case("\"foo\":", text_token("foo"))]
-    #[case("  \"foo\"  :", text_token("foo"))]
-    fn test_parse_struct_field_name(#[case] text: &str, #[case] expected: RawSymbolToken) {
-        parse_test_ok(struct_field_name, text, expected);
+    #[case("foo:", "foo")]
+    #[case("  foo  :", "foo")]
+    #[case("/* Here's a field name */  foo // And here's a delimiter\n:", "foo")]
+    #[case("'foo':", "foo")]
+    #[case("  'foo'  :", "foo")]
+    #[case("$10:", 10)]
+    #[case("  $10  :", 10)]
+    #[case("\"foo\":", "foo")]
+    #[case("  \"foo\"  :", "foo")]
+    fn test_parse_struct_field_name<T: Into<RawSymbolToken>>(
+        #[case] text: &str,
+        #[case] expected: T,
+    ) {
+        parse_test_ok(struct_field_name, text, expected.into());
     }
 
     #[rstest]
-    #[case("foo:", Some(text_token("foo")))]
-    #[case("  foo  :", Some(text_token("foo")))]
-    #[case("'foo':", Some(text_token("foo")))]
+    #[case("foo:", Some(RawSymbolToken::from("foo")))]
+    #[case("  foo  :", Some(RawSymbolToken::from("foo")))]
+    #[case("'foo':", Some(RawSymbolToken::from("foo")))]
     #[case("}", None)]
     #[case("   }", None)]
     #[case("/*comment*/}", None)]

@@ -45,6 +45,22 @@ impl AsRef<Sequence> for Sequence {
     }
 }
 
+impl FromIterator<Element> for Sequence {
+    fn from_iter<T: IntoIterator<Item = Element>>(iter: T) -> Self {
+        let elements: Vec<Element> = Vec::from_iter(iter);
+        elements.into()
+    }
+}
+
+impl<'a> IntoIterator for &'a Sequence {
+    type Item = &'a Element;
+    type IntoIter = ElementsIterator<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        ElementsIterator::new(self.elements.as_slice())
+    }
+}
+
 // This is more efficient than Sequence::new(), which will iterate over and convert each value to
 // an Element for better ergonomics.
 impl From<Vec<Element>> for Sequence {

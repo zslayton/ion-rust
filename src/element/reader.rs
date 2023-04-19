@@ -5,14 +5,15 @@
 
 use crate::element::{Annotations, Element, Sequence, Struct, Value};
 use crate::result::{decoding_error, IonResult};
-use crate::{IonReader, StreamItem, Symbol};
+use crate::value_reader::{SequenceReader, SequenceRef, StructRef, ValueReader};
+use crate::{IonReader, RawIonReader, RawStreamItem, StreamItem, UserReader, ValueRef};
 
 /// Reads Ion data into [`Element`] instances.
 ///
 /// This trait is automatically implemented by all Ion reader implementations that operate
 /// at the highest layer of abstraction, sometimes called the 'user' layer.
 pub trait ElementReader {
-    type ElementIterator<'a>: Iterator<Item = IonResult<Element>>
+    type ElementIter<'a>: Iterator<Item = IonResult<Element>>
     where
         Self: 'a;
 
@@ -22,7 +23,7 @@ pub trait ElementReader {
     fn read_next_element(&mut self) -> IonResult<Option<Element>>;
 
     /// Returns an iterator over the [Element]s in the data stream.
-    fn elements(&mut self) -> Self::ElementIterator<'_>;
+    fn elements(&mut self) -> Self::ElementIter<'_>;
 
     /// Like [Self::read_next_element], this method reads the next Ion value in the input stream,
     /// returning it as an `Ok(Element)`. However, it also requires that the stream contain exactly
@@ -61,17 +62,17 @@ pub trait ElementReader {
     }
 }
 
-impl<R> ElementReader for R
+impl<R> ElementReader for UserReader<R>
 where
-    R: IonReader<Item = StreamItem, Symbol = Symbol>,
+    R: RawIonReader,
 {
-    type ElementIterator<'a> = ElementIterator<'a, R> where R: 'a;
+    type ElementIter<'a> = ElementIterator<'a, UserReader<R>> where R: 'a;
 
     fn read_next_element(&mut self) -> IonResult<Option<Element>> {
         ElementLoader::for_reader(self).materialize_next()
     }
 
-    fn elements(&mut self) -> ElementIterator<R> {
+    fn elements(&mut self) -> Self::ElementIter<'_> {
         ElementIterator { reader: self }
     }
 }
@@ -96,96 +97,84 @@ impl<'a, R: ElementReader> Iterator for ElementIterator<'a, R> {
 
 /// Helper type; wraps an [ElementReader] and recursively materializes the next value in the
 /// reader's input, reporting any errors that might occur along the way.
-struct ElementLoader<'a, R> {
-    reader: &'a mut R,
+struct ElementLoader<'a, R: RawIonReader> {
+    reader: &'a mut UserReader<R>,
 }
 
-impl<'a, R: IonReader<Item = StreamItem, Symbol = Symbol>> ElementLoader<'a, R> {
-    pub(crate) fn for_reader(reader: &mut R) -> ElementLoader<R> {
+impl<'a, R: RawIonReader + 'a> ElementLoader<'a, R> {
+    pub(crate) fn for_reader(reader: &mut UserReader<R>) -> ElementLoader<R> {
         ElementLoader { reader }
     }
 
-    /// Advances the reader to the next value in the stream and uses [Self::materialize_current]
+    /// Advances the reader to the next value in the stream and uses [Self::materialize_value]
     /// to materialize it.
     pub(crate) fn materialize_next(&mut self) -> IonResult<Option<Element>> {
         // Advance the reader to the next value
-        let _ = self.reader.next()?;
-        self.materialize_current()
+        let mut value_reader = match self.reader.next()? {
+            StreamItem::Value(v) => v,
+            StreamItem::Nothing => return Ok(None),
+        };
+        Ok(Some(Self::materialize_value(&mut value_reader)?))
     }
 
     /// Recursively materialize the reader's current Ion value and returns it as `Ok(Some(value))`.
     /// If there are no more values at this level, returns `Ok(None)`.
     /// If an error occurs while materializing the value, returns an `Err`.
     /// Calling this method advances the reader and consumes the current value.
-    fn materialize_current(&mut self) -> IonResult<Option<Element>> {
+    fn materialize_value(value_reader: &mut ValueReader<R>) -> IonResult<Element> {
         // Collect this item's annotations into a Vec. We have to do this before materializing the
         // value itself because materializing a collection requires advancing the reader further.
         let mut annotations = Vec::new();
-        // Current API limitations require `self.reader.annotations()` to heap allocate its
-        // iterator even if there aren't annotations. `self.reader.has_annotations()` is trivial
-        // and allows us to skip the heap allocation in the common case.
-        if self.reader.has_annotations() {
-            for annotation in self.reader.annotations() {
-                annotations.push(annotation?);
-            }
+        for annotation in value_reader.annotations() {
+            annotations.push(annotation?.to_owned());
         }
 
-        let value = match self.reader.current() {
-            // No more values at this level of the stream
-            StreamItem::Nothing => return Ok(None),
-            // This is a typed null
-            StreamItem::Null(ion_type) => Value::Null(ion_type),
-            // This is a non-null value
-            StreamItem::Value(ion_type) => {
-                use crate::IonType::*;
-                match ion_type {
-                    Null => unreachable!("non-null value had IonType::Null"),
-                    Bool => Value::Bool(self.reader.read_bool()?),
-                    Int => Value::Int(self.reader.read_int()?),
-                    Float => Value::Float(self.reader.read_f64()?),
-                    Decimal => Value::Decimal(self.reader.read_decimal()?),
-                    Timestamp => Value::Timestamp(self.reader.read_timestamp()?),
-                    Symbol => Value::Symbol(self.reader.read_symbol()?),
-                    String => Value::String(self.reader.read_string()?),
-                    Clob => Value::Clob(self.reader.read_clob()?.into()),
-                    Blob => Value::Blob(self.reader.read_blob()?.into()),
-                    // It's a collection; recursively materialize all of this value's children
-                    List => Value::List(self.materialize_sequence()?),
-                    SExp => Value::SExp(self.materialize_sequence()?),
-                    Struct => Value::Struct(self.materialize_struct()?),
-                }
-            }
+        let value = match value_reader.read()? {
+            ValueRef::Null(ion_type) => Value::Null(ion_type),
+            ValueRef::Bool(b) => Value::Bool(b),
+            ValueRef::Int(i) => Value::Int(i),
+            ValueRef::Float(f) => Value::Float(f),
+            ValueRef::Decimal(d) => Value::Decimal(d),
+            ValueRef::Timestamp(t) => Value::Timestamp(t),
+            ValueRef::String(s) => Value::String(s.into()),
+            ValueRef::Symbol(s) => Value::Symbol(s),
+            ValueRef::Blob(b) => Value::Blob(b.into()),
+            ValueRef::Clob(c) => Value::Clob(c.into()),
+            ValueRef::SExp(s) => Value::SExp(Self::materialize_sequence(s)?),
+            ValueRef::List(l) => Value::List(Self::materialize_sequence(l)?),
+            ValueRef::Struct(s) => Value::Struct(Self::materialize_struct(s)?),
         };
-        Ok(Some(Element::new(Annotations::new(annotations), value)))
+
+        Ok(Element::new(Annotations::new(annotations), value))
     }
 
     /// Steps into the current sequence and materializes each of its children to construct
     /// an [Vec<Element>]. When all of the the children have been materialized, steps out.
     /// The reader MUST be positioned over a list or s-expression when this is called.
-    fn materialize_sequence(&mut self) -> IonResult<Sequence> {
+    fn materialize_sequence(sequence: SequenceRef<R>) -> IonResult<Sequence> {
         let mut child_elements = Vec::new();
-        self.reader.step_in()?;
-        while let Some(element) = self.materialize_next()? {
-            child_elements.push(element);
+
+        let mut seq_reader = sequence.step_in()?;
+        while let Some(mut value) = seq_reader.next_element()? {
+            child_elements.push(Self::materialize_value(&mut value)?);
         }
-        self.reader.step_out()?;
+        seq_reader.step_out()?;
         Ok(child_elements.into())
     }
 
     /// Steps into the current struct and materializes each of its fields to construct
     /// an [OwnedStruct]. When all of the the fields have been materialized, steps out.
     /// The reader MUST be positioned over a struct when this is called.
-    fn materialize_struct(&mut self) -> IonResult<Struct> {
+    fn materialize_struct(struct_ref: StructRef<R>) -> IonResult<Struct> {
         let mut child_elements = Vec::new();
-        self.reader.step_in()?;
-        while let StreamItem::Value(_) | StreamItem::Null(_) = self.reader.next()? {
-            let field_name = self.reader.field_name()?;
-            let value = self
-                .materialize_current()?
-                .expect("materialize_current() returned None for user data");
-            child_elements.push((field_name, value));
+        let mut struct_reader = struct_ref.step_in()?;
+        while let Some(mut field) = struct_reader.next_field()? {
+            child_elements.push((
+                field.read_name()?.to_owned(),
+                Self::materialize_value(&mut field.value())?,
+            ))
         }
-        self.reader.step_out()?;
+        struct_reader.step_out()?;
         Ok(Struct::from_iter(child_elements.into_iter()))
     }
 }
@@ -385,6 +374,7 @@ mod reader_tests {
         ]
     )]
     fn read_and_compare(#[case] input: &[u8], #[case] expected: Vec<Element>) -> IonResult<()> {
+        let expected: Sequence = expected.into();
         let actual = Element::read_all(input)?;
         assert!(expected.ion_eq(&actual));
         Ok(())

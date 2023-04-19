@@ -6,6 +6,7 @@ use nom::Err::{Error, Failure, Incomplete};
 
 use crate::raw_reader::{BufferedRawReader, RawStreamItem};
 use crate::raw_symbol_token::RawSymbolToken;
+use crate::raw_symbol_token_ref::AsRawSymbolTokenRef;
 use crate::result::{
     decoding_error, illegal_operation, illegal_operation_raw, incomplete_text_error, IonError,
     IonResult, Position,
@@ -23,8 +24,8 @@ use crate::text::text_value::{AnnotatedTextValue, TextValue};
 use crate::types::decimal::Decimal;
 use crate::types::integer::Int;
 use crate::types::timestamp::Timestamp;
-use crate::types::value_ref::ValueRef;
-use crate::{IonType};
+use crate::types::value_ref::RawValueRef;
+use crate::{IonType, RawIonReader, RawSymbolTokenRef};
 
 const INITIAL_PARENTS_CAPACITY: usize = 16;
 
@@ -698,10 +699,7 @@ const EMPTY_SLICE_RAW_SYMBOL_TOKEN: &[RawSymbolToken] = &[];
 //       materializing it and then attempt to materialize it when the user calls `read_TYPE`. This
 //       would take less memory and would only materialize values that the user requests.
 //       See: https://github.com/amazon-ion/ion-rust/issues/322
-impl<A: AsRef<[u8]> + Expandable> IonReader for RawTextReader<A> {
-    type Item = RawStreamItem;
-    type Symbol = RawSymbolToken;
-
+impl<A: AsRef<[u8]> + Expandable> RawIonReader for RawTextReader<A> {
     fn ion_version(&self) -> (u8, u8) {
         (1, 0)
     }
@@ -755,14 +753,14 @@ impl<A: AsRef<[u8]> + Expandable> IonReader for RawTextReader<A> {
         false
     }
 
-    fn annotations<'a>(&'a self) -> Box<dyn Iterator<Item = IonResult<Self::Symbol>> + 'a> {
+    fn annotations<'a>(&'a self) -> Box<dyn Iterator<Item = IonResult<RawSymbolTokenRef>> + 'a> {
         let iterator = self
             .current_value
             .as_ref()
             .map(|value| value.annotations())
             .unwrap_or(EMPTY_SLICE_RAW_SYMBOL_TOKEN)
             .iter()
-            .cloned()
+            .map(|token| token.as_raw_symbol_token_ref())
             // The annotations are already in memory and are already resolved to text, so
             // this step cannot fail. Map each token to Ok(token).
             .map(Ok);
@@ -783,9 +781,9 @@ impl<A: AsRef<[u8]> + Expandable> IonReader for RawTextReader<A> {
             .unwrap_or(0)
     }
 
-    fn field_name(&self) -> IonResult<Self::Symbol> {
+    fn field_name(&self) -> IonResult<RawSymbolTokenRef> {
         match self.current_field_name.as_ref() {
-            Some(name) => Ok(name.clone()),
+            Some(name) => Ok(name.as_raw_symbol_token_ref()),
             None => illegal_operation(
                 "field_name() can only be called when the reader is positioned inside a struct",
             ),
@@ -858,9 +856,9 @@ impl<A: AsRef<[u8]> + Expandable> IonReader for RawTextReader<A> {
         }
     }
 
-    fn read_symbol(&mut self) -> IonResult<Self::Symbol> {
+    fn read_symbol(&mut self) -> IonResult<RawSymbolTokenRef> {
         match self.current_value.as_ref().map(|current| current.value()) {
-            Some(TextValue::Symbol(ref value)) => Ok(value.clone()),
+            Some(TextValue::Symbol(ref value)) => Ok(value.as_raw_symbol_token_ref()),
             _ => Err(self.expected("symbol value")),
         }
     }
@@ -956,26 +954,26 @@ impl<A: AsRef<[u8]> + Expandable> IonReader for RawTextReader<A> {
         self.parents.len()
     }
 
-    fn read_value(&mut self) -> IonResult<ValueRef<Self::Symbol>> {
+    fn read_value(&mut self) -> IonResult<RawValueRef> {
         let text_value = match self.current_value.as_ref() {
             None => return illegal_operation("the reader is not positioned on a value"),
             Some(text_value) => text_value,
         };
 
         let value_ref = match text_value.value() {
-            TextValue::Null(ion_type) => ValueRef::Null(*ion_type),
-            TextValue::Bool(b) => ValueRef::Bool(*b),
-            TextValue::Int(i) => ValueRef::Int(i.clone()),
-            TextValue::Float(f) => ValueRef::Float(*f),
-            TextValue::Decimal(d) => ValueRef::Decimal(d.clone()),
-            TextValue::Timestamp(t) => ValueRef::Timestamp(t.clone()),
-            TextValue::String(s) => ValueRef::String(s.as_str()),
-            TextValue::Symbol(sym) => ValueRef::Symbol(sym.clone()),
-            TextValue::Blob(b) => ValueRef::Blob(b.as_slice()),
-            TextValue::Clob(c) => ValueRef::Clob(c.as_slice()),
-            TextValue::ListStart => ValueRef::List,
-            TextValue::SExpStart => ValueRef::SExp,
-            TextValue::StructStart => ValueRef::Struct,
+            TextValue::Null(ion_type) => RawValueRef::Null(*ion_type),
+            TextValue::Bool(b) => RawValueRef::Bool(*b),
+            TextValue::Int(i) => RawValueRef::Int(i.clone()),
+            TextValue::Float(f) => RawValueRef::Float(*f),
+            TextValue::Decimal(d) => RawValueRef::Decimal(d.clone()),
+            TextValue::Timestamp(t) => RawValueRef::Timestamp(t.clone()),
+            TextValue::String(s) => RawValueRef::String(s.as_str()),
+            TextValue::Symbol(sym) => RawValueRef::Symbol(sym.as_raw_symbol_token_ref()),
+            TextValue::Blob(b) => RawValueRef::Blob(b.as_slice()),
+            TextValue::Clob(c) => RawValueRef::Clob(c.as_slice()),
+            TextValue::ListStart => RawValueRef::List,
+            TextValue::SExpStart => RawValueRef::SExp,
+            TextValue::StructStart => RawValueRef::Struct,
         };
         Ok(value_ref)
     }
@@ -1001,7 +999,7 @@ mod reader_tests {
 
     use super::*;
     use crate::raw_reader::RawStreamItem;
-    use crate::raw_symbol_token::{local_sid_token, text_token, RawSymbolToken};
+    use crate::raw_symbol_token::RawSymbolToken;
     use crate::result::{IonResult, Position};
     use crate::stream_reader::IonReader;
     use crate::text::non_blocking::raw_text_reader::RawTextReader;
@@ -1026,7 +1024,7 @@ mod reader_tests {
         let expected: Vec<RawSymbolToken> = expected.into_annotations();
         let actual: Vec<RawSymbolToken> = reader
             .annotations()
-            .map(|a| a.expect("annotation with unknown text"))
+            .map(|a| a.expect("annotation with unknown text").to_owned())
             .collect();
         assert_eq!(actual, expected);
     }
@@ -1181,9 +1179,9 @@ mod reader_tests {
         next_type(reader, IonType::Struct, false);
         reader.step_in()?;
         next_type(reader, IonType::Int, false);
-        assert_eq!(reader.field_name()?, text_token("foo"));
+        assert_eq!(reader.field_name()?, RawSymbolToken::from("foo"));
         next_type(reader, IonType::Struct, false);
-        assert_eq!(reader.field_name()?, text_token("bar"));
+        assert_eq!(reader.field_name()?, RawSymbolToken::from("bar"));
         reader.step_in()?;
         next_type(reader, IonType::Int, false);
         assert_eq!(reader.read_i64()?, 5);
@@ -1204,7 +1202,7 @@ mod reader_tests {
     #[case(" 2.5e0 ", TextValue::Float(2.5))]
     #[case(" 2.5 ", TextValue::Decimal(Decimal::new(25, -1)))]
     #[case(" 2007-07-12T ", TextValue::Timestamp(Timestamp::with_ymd(2007, 7, 12).build().unwrap()))]
-    #[case(" foo ", TextValue::Symbol(text_token("foo")))]
+    #[case(" foo ", TextValue::Symbol(RawSymbolToken::from("foo")))]
     #[case(" \"hi!\" ", TextValue::String("hi!".to_owned()))]
     #[case(" {{ZW5jb2RlZA==}} ", TextValue::Blob(Vec::from("encoded".as_bytes())))]
     #[case(" {{\"hello\"}} ", TextValue::Clob(Vec::from("hello".as_bytes())))]
@@ -1261,13 +1259,13 @@ mod reader_tests {
         );
 
         next_type(reader, IonType::Symbol, false);
-        assert_eq!(reader.read_symbol()?, text_token("$ion_1_0"));
+        assert_eq!(reader.read_symbol()?, RawSymbolToken::from("$ion_1_0"));
 
         // A mid-stream Ion Version Marker
         assert_eq!(reader.next()?, RawStreamItem::VersionMarker(1, 0));
 
         next_type(reader, IonType::Symbol, false);
-        assert_eq!(reader.read_symbol()?, text_token("foo"));
+        assert_eq!(reader.read_symbol()?, RawSymbolToken::from("foo"));
 
         next_type(reader, IonType::String, false);
         assert_eq!(reader.read_string()?, "hello".to_string());
@@ -1278,8 +1276,8 @@ mod reader_tests {
         next_type(reader, IonType::Struct, false);
         reader.step_in()?;
         next_type(reader, IonType::Symbol, false);
-        assert_eq!(reader.read_symbol()?, text_token("bar"));
-        assert_eq!(reader.field_name()?, text_token("foo"));
+        assert_eq!(reader.read_symbol()?, RawSymbolToken::from("bar"));
+        assert_eq!(reader.field_name()?, RawSymbolToken::from("foo"));
 
         assert_eq!(reader.next()?, Nothing);
         reader.step_out()?;
@@ -1367,7 +1365,10 @@ mod reader_tests {
 
         next_type(reader, IonType::Int, false);
         assert_eq!(reader.read_i64()?, 5);
-        annotations_eq(reader, &[local_sid_token(17), text_token("mars")]);
+        annotations_eq(
+            reader,
+            &[RawSymbolToken::from(17), RawSymbolToken::from("mars")],
+        );
 
         next_type(reader, IonType::Float, false);
         assert_eq!(reader.read_f64()?, 5.0f64);
@@ -1385,7 +1386,7 @@ mod reader_tests {
         annotations_eq(reader, [100, 200, 300]);
 
         next_type(reader, IonType::Symbol, false);
-        assert_eq!(reader.read_symbol()?, text_token("foo"));
+        assert_eq!(reader.read_symbol()?, RawSymbolToken::from("foo"));
         annotations_eq(reader, ["uranus"]);
 
         next_type(reader, IonType::String, false);
@@ -1399,9 +1400,9 @@ mod reader_tests {
         annotations_eq(reader, 55);
         reader.step_in()?;
         next_type(reader, IonType::Symbol, false);
-        assert_eq!(reader.field_name()?, text_token("foo"));
+        assert_eq!(reader.field_name()?, RawSymbolToken::from("foo"));
         annotations_eq(reader, 21);
-        assert_eq!(reader.read_symbol()?, text_token("bar"));
+        assert_eq!(reader.read_symbol()?, RawSymbolToken::from("bar"));
         assert_eq!(reader.next()?, Nothing);
         reader.step_out()?;
 
@@ -1425,11 +1426,11 @@ mod reader_tests {
         annotations_eq(reader, ["haumea", "makemake", "eris", "ceres"]);
         reader.step_in()?;
         next_type(reader, IonType::Symbol, false);
-        assert_eq!(reader.read_symbol()?, text_token("++"));
+        assert_eq!(reader.read_symbol()?, RawSymbolToken::from("++"));
         next_type(reader, IonType::Symbol, false);
-        assert_eq!(reader.read_symbol()?, text_token("--"));
+        assert_eq!(reader.read_symbol()?, RawSymbolToken::from("--"));
         next_type(reader, IonType::Symbol, false);
-        assert_eq!(reader.read_symbol()?, text_token("&&&&&"));
+        assert_eq!(reader.read_symbol()?, RawSymbolToken::from("&&&&&"));
         assert_eq!(reader.next()?, Nothing);
         reader.step_out()?;
 

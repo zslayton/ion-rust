@@ -905,14 +905,14 @@ impl<W: Write> IonWriter for RawBinaryWriter<W> {
 mod writer_tests {
     use std::fmt::Debug;
 
-    use crate::StreamItem;
+    use crate::{ion_seq, RawIonReader, RawStreamItem, StreamItem, ValueRef};
 
     use rstest::*;
 
     use super::*;
-    use crate::element::{Blob, Clob};
-    use crate::raw_symbol_token::{local_sid_token, RawSymbolToken};
-    use crate::reader::{Reader, ReaderBuilder};
+    use crate::binary::non_blocking::raw_binary_reader::RawBinaryReader;
+    use crate::element::{Blob, Clob, Element, Sequence};
+    use crate::raw_symbol_token::RawSymbolToken;
     use crate::symbol::Symbol;
     use crate::IonReader;
     use num_bigint::BigInt;
@@ -921,12 +921,13 @@ mod writer_tests {
     use std::str::FromStr;
 
     type TestWriter<'a> = RawBinaryWriter<&'a mut Vec<u8>>;
-    type TestReader<'a> = Reader<'a>;
+    type TestReader<'a> = RawBinaryReader<&'a [u8]>;
+    type ExpectedValueRef<'a> = ValueRef<'a, Box<dyn RawIonReader + 'a>>;
 
-    /// A reusable test outline for verifying BinarySystemWriter behavior.
+    /// A reusable test outline for verifying RawBinaryWriter behavior.
     fn binary_writer_test(
         mut write_fn: impl FnMut(&mut TestWriter) -> IonResult<()>,
-        mut read_fn: impl FnMut(&mut TestReader) -> IonResult<()>,
+        expected_elements: Sequence,
     ) -> IonResult<()> {
         // Create a BinarySystemWriter that writes to a byte vector.
         let mut buffer = vec![];
@@ -937,44 +938,9 @@ mod writer_tests {
         write_fn(&mut writer)?;
         writer.flush()?;
 
-        // Create a BinaryReader that reads from the BinarySystemWriter's output.
-        let data = buffer.as_slice();
-        let mut reader = ReaderBuilder::new().build(data)?;
-
-        // Call the user's verification function
-        read_fn(&mut reader)
-    }
-
-    /// A reusable test outline for verifying BinarySystemWriter scalar encoding behavior.
-    fn binary_writer_scalar_test<T, U>(
-        values: &[T],
-        ion_type: IonType,
-        mut write_fn: impl FnMut(&mut TestWriter, &T) -> IonResult<()>,
-        mut read_fn: impl FnMut(&mut TestReader) -> IonResult<U>,
-    ) -> IonResult<()>
-    where
-        T: Debug,
-        U: std::cmp::PartialEq<T> + Debug,
-    {
-        binary_writer_test(
-            |writer| {
-                for value in values {
-                    write_fn(writer, value)?;
-                }
-                Ok(())
-            },
-            |reader| {
-                for value in values {
-                    assert_eq!(reader.next()?, StreamItem::Value(ion_type));
-                    let reader_value = read_fn(reader)?;
-                    assert_eq!(
-                        reader_value, *value,
-                        "Value read back in (left) was not equal to the original value (right)"
-                    );
-                }
-                Ok(())
-            },
-        )
+        let actual_elements = Element::read_all(buffer)?;
+        assert_eq!(actual_elements, expected_elements);
+        Ok(())
     }
 
     #[test]
@@ -1002,42 +968,49 @@ mod writer_tests {
                 }
                 Ok(())
             },
-            |reader| {
-                for ion_type in ion_types {
-                    assert_eq!(reader.next()?, StreamItem::Null(*ion_type));
-                }
-                Ok(())
-            },
+            ion_types.iter().cloned().map(Element::null).collect(),
         )
     }
 
     #[test]
     fn binary_writer_bools() -> IonResult<()> {
-        binary_writer_scalar_test(
-            &[true, false],
-            IonType::Bool,
-            |writer, v| writer.write_bool(*v),
-            |reader| reader.read_bool(),
+        let values = &[true, false];
+        binary_writer_test(
+            |writer| {
+                for value in values {
+                    writer.write_bool(*value)?;
+                }
+                Ok(())
+            },
+            Sequence::new(values),
         )
     }
 
     #[test]
     fn binary_writer_ints() -> IonResult<()> {
-        binary_writer_scalar_test(
-            &[-24_601, -17, -1, 0, 1, 17, 24_601],
-            IonType::Int,
-            |writer, v| writer.write_i64(*v),
-            |reader| reader.read_i64(),
+        let values = &[-24_601_i64, -17, -1, 0, 1, 17, 24_601];
+        binary_writer_test(
+            |writer| {
+                for value in values {
+                    writer.write_i64(*value)?
+                }
+                Ok(())
+            },
+            Sequence::new(values),
         )
     }
 
     #[test]
     fn binary_writer_floats() -> IonResult<()> {
-        binary_writer_scalar_test(
-            &[-24.601, -1.7, -1.0, -0.0, 0.0, 1.0, 1.7, 24.601],
-            IonType::Float,
-            |writer, v| writer.write_f64(*v),
-            |reader| reader.read_f64(),
+        let values = &[-24.601_f64, -1.7, -1.0, -0.0, 0.0, 1.0, 1.7, 24.601];
+        binary_writer_test(
+            |writer| {
+                for value in values {
+                    writer.write_f64(*value)?
+                }
+                Ok(())
+            },
+            Sequence::new(values),
         )
     }
 
@@ -1054,11 +1027,9 @@ mod writer_tests {
     #[case::ymd_hms_nanos_unknown(Timestamp::with_ymd(2021, 1, 8).with_hms(14, 12, 36).with_nanoseconds(888888888).build_at_unknown_offset().unwrap())]
     #[case::ymd_hms_nanos_est(Timestamp::with_ymd(2021, 1, 8).with_hms(14, 12, 36).with_nanoseconds(888888888).build_at_offset(-5 * 60).unwrap())]
     fn binary_writer_timestamps(#[case] timestamp: Timestamp) -> IonResult<()> {
-        binary_writer_scalar_test(
-            &[timestamp],
-            IonType::Timestamp,
-            |writer, v| writer.write_timestamp(v),
-            |reader| reader.read_timestamp(),
+        binary_writer_test(
+            |writer| writer.write_timestamp(&timestamp),
+            Sequence::new([&timestamp]),
         )
     }
 
@@ -1073,35 +1044,38 @@ mod writer_tests {
     #[case::negative_zero(f64::neg_zero())]
     fn binary_writer_decimals(#[case] value: f64) -> IonResult<()> {
         let decimal: Decimal = value.try_into().unwrap();
-        binary_writer_scalar_test(
-            &[decimal],
-            IonType::Decimal,
-            |writer, v| writer.write_decimal(v),
-            |reader| reader.read_decimal(),
+        binary_writer_test(
+            |writer| writer.write_decimal(&decimal),
+            Sequence::new([&decimal]),
         )
     }
 
     #[test]
     fn binary_writer_symbols() -> IonResult<()> {
-        let symbol_ids: Vec<RawSymbolToken> = [0, 5, 10, 31, 111, 556, 1024, 74_991, 111_448]
-            .iter()
-            .map(|sid| local_sid_token(*sid))
-            .collect();
-        binary_writer_scalar_test(
-            symbol_ids.as_slice(),
-            IonType::Symbol,
-            |writer, v| writer.write_symbol_id(v.local_sid().unwrap()),
-            |reader| reader.read_raw_symbol(),
+        let values = &[0usize, 7, 10, 11, 12];
+        binary_writer_test(
+            |writer| {
+                write_lst(writer, &["foo", "bar", "baz"])?; // $10, $11, $12
+                for value in values {
+                    writer.write_symbol_id(*value)?
+                }
+                Ok(())
+            },
+            Element::read_all(r#"$0 symbols foo bar baz"#)?,
         )
     }
 
     #[test]
     fn binary_writer_strings() -> IonResult<()> {
-        binary_writer_scalar_test(
-            &["", "foo", "bar", "baz", "quux", "Winnipeg", "😂😂😂"],
-            IonType::String,
-            |writer, v| writer.write_string(*v),
-            |reader| reader.read_string(),
+        let values = &["", "foo", "bar", "baz", "quux", "Winnipeg", "😂😂😂"];
+        binary_writer_test(
+            |writer| {
+                for value in values {
+                    writer.write_string(value)?;
+                }
+                Ok(())
+            },
+            Sequence::new(values),
         )
     }
 
@@ -1115,110 +1089,25 @@ mod writer_tests {
         let clobs: Vec<Clob> = values.iter().map(|b| Clob::from(*b)).collect();
         let blobs: Vec<Blob> = values.iter().map(|b| Blob::from(*b)).collect();
 
-        binary_writer_scalar_test(
-            clobs.as_slice(),
-            IonType::Clob,
-            |writer, v| writer.write_clob(v),
-            |reader| reader.read_clob(),
+        binary_writer_test(
+            |writer| {
+                for clob in &clobs {
+                    writer.write_clob(clob.as_slice())?
+                }
+                Ok(())
+            },
+            Sequence::new(&clobs),
         )?;
 
-        binary_writer_scalar_test(
-            blobs.as_slice(),
-            IonType::Blob,
-            |writer, v| writer.write_blob(v),
-            |reader| reader.read_blob(),
+        binary_writer_test(
+            |writer| {
+                for blob in &blobs {
+                    writer.write_blob(blob.as_slice())?
+                }
+                Ok(())
+            },
+            Sequence::new(&blobs),
         )
-    }
-
-    fn expect_scalar<T: Debug, U: PartialEq<T> + Debug>(
-        reader: &mut TestReader,
-        ion_type: IonType,
-        mut read_fn: impl FnMut(&mut TestReader) -> IonResult<U>,
-        expected_value: T,
-    ) {
-        let next = reader.next().unwrap_or_else(|_| {
-            panic!("Expected to read {expected_value:?}, but the stream was empty.")
-        });
-        assert_eq!(next, StreamItem::Value(ion_type));
-        let value = read_fn(reader)
-            .unwrap_or_else(|_| panic!("Failed to read in expected value: {expected_value:?}"));
-        assert_eq!(value, expected_value);
-    }
-
-    fn expect_bool(reader: &mut TestReader, value: bool) {
-        expect_scalar(reader, IonType::Bool, |r| r.read_bool(), value);
-    }
-
-    fn expect_integer(reader: &mut TestReader, value: i64) {
-        expect_scalar(reader, IonType::Int, |r| r.read_i64(), value);
-    }
-
-    fn expect_big_integer(reader: &mut TestReader, value: &BigInt) {
-        expect_scalar(
-            reader,
-            IonType::Int,
-            |r| r.read_int(),
-            Int::BigInt(value.clone()),
-        );
-    }
-
-    fn expect_float(reader: &mut TestReader, value: f64) {
-        expect_scalar(reader, IonType::Float, |r| r.read_f64(), value);
-    }
-
-    fn expect_symbol_id(reader: &mut TestReader, value: SymbolId) {
-        expect_scalar(
-            reader,
-            IonType::Symbol,
-            |r| r.read_raw_symbol(),
-            local_sid_token(value),
-        );
-    }
-
-    fn expect_string(reader: &mut TestReader, value: &str) {
-        expect_scalar(reader, IonType::String, |r| r.read_string(), value);
-    }
-
-    fn expect_null(reader: &mut TestReader) {
-        assert_eq!(
-            reader.next().expect("Failed to read null."),
-            StreamItem::Null(IonType::Null)
-        );
-    }
-
-    fn expect_container(reader: &mut TestReader, ion_type: IonType) {
-        assert_eq!(
-            reader.next().expect("Failed to read container."),
-            StreamItem::Value(ion_type)
-        );
-    }
-
-    fn expect_list(reader: &mut TestReader) {
-        expect_container(reader, IonType::List);
-    }
-
-    fn expect_s_expression(reader: &mut TestReader) {
-        expect_container(reader, IonType::SExp);
-    }
-
-    fn expect_struct(reader: &mut TestReader) {
-        expect_container(reader, IonType::Struct);
-    }
-
-    fn expect_field_name(reader: &TestReader, field_name: &str) {
-        assert!(reader.field_name().is_ok());
-        assert_eq!(reader.field_name().unwrap(), field_name);
-    }
-
-    fn expect_annotations(reader: &TestReader, annotations: &[&str]) {
-        assert_eq!(
-            reader
-                .annotations()
-                .map(|opt| opt.expect("Annotation with unknown text."))
-                .collect::<Vec<Symbol>>()
-                .as_slice(),
-            annotations
-        );
     }
 
     fn write_lst<W: Write>(writer: &mut RawBinaryWriter<W>, symbols: &[&str]) -> IonResult<()> {
@@ -1253,14 +1142,13 @@ mod writer_tests {
                 writer.write_int(&Int::BigInt(very_big_negative.clone()))?;
                 Ok(())
             },
-            |reader| {
-                expect_big_integer(reader, &BigInt::zero());
-                expect_big_integer(reader, &big_positive);
-                expect_big_integer(reader, &very_big_positive);
-                expect_big_integer(reader, &big_negative);
-                expect_big_integer(reader, &very_big_negative);
-                Ok(())
-            },
+            ion_seq!(
+                BigInt::zero()
+                {&big_positive}
+                {&very_big_positive}
+                {&big_negative}
+                {&very_big_negative}
+            ),
         )
     }
 
@@ -1277,15 +1165,14 @@ mod writer_tests {
                 writer.write_f64(7.5)?;
                 writer.write_bool(false)
             },
-            |reader| {
-                expect_integer(reader, 42);
-                expect_string(reader, "Hello");
-                expect_symbol_id(reader, 12);
-                expect_float(reader, 2.5);
-                expect_float(reader, 7.5);
-                expect_bool(reader, false);
-                Ok(())
-            },
+            ion_seq!(
+                42
+                "Hello"
+                12
+                2.5f64
+                7.5f64
+                false
+            ),
         )
     }
 
@@ -1304,17 +1191,13 @@ mod writer_tests {
                 writer.set_annotations([13, 14, 15]);
                 writer.write_string("Hello")
             },
-            |reader| {
-                expect_bool(reader, true);
-                expect_annotations(reader, &["foo"]);
-
-                expect_integer(reader, 42);
-                expect_annotations(reader, &["bar", "baz"]);
-
-                expect_string(reader, "Hello");
-                expect_annotations(reader, &["quux", "quuz", "waldo"]);
-                Ok(())
-            },
+            Element::read_all(
+                r#"
+                    foo::true
+                    bar::baz::42
+                    quux::quuz::waldo::"Hello"
+                "#,
+            )?,
         )
     }
 
@@ -1346,27 +1229,13 @@ mod writer_tests {
                 writer.write_string("foo")?;
                 writer.step_out()
             },
-            |reader| {
-                expect_s_expression(reader);
-                expect_annotations(reader, &["foo"]);
-                reader.step_in()?;
-                expect_bool(reader, true);
-                reader.step_out()?;
-
-                expect_list(reader);
-                expect_annotations(reader, &["bar", "baz"]);
-                reader.step_in()?;
-                expect_integer(reader, 11);
-                reader.step_out()?;
-
-                expect_struct(reader);
-                expect_annotations(reader, &["quux", "quuz", "waldo"]);
-                reader.step_in()?;
-                expect_string(reader, "foo");
-                expect_field_name(reader, "gary");
-                reader.step_out()?;
-                Ok(())
-            },
+            Element::read_all(
+                r#"
+                    foo::(true)
+                    bar::baz::[11]
+                    quux::quuz::waldo::{gary: "foo"}
+                "#,
+            )?,
         )
     }
 
@@ -1386,20 +1255,11 @@ mod writer_tests {
                 writer.step_out()?; // End of list
                 writer.step_out() // End of struct
             },
-            |reader| {
-                expect_struct(reader);
-                expect_annotations(reader, &["foo"]);
-                reader.step_in()?;
-                expect_list(reader);
-                expect_field_name(reader, "bar");
-                expect_annotations(reader, &["baz"]);
-                reader.step_in()?;
-                expect_string(reader, "quuz");
-                expect_annotations(reader, &["quux"]);
-                reader.step_out()?;
-                reader.step_out()?;
-                Ok(())
-            },
+            Element::read_all(
+                r#"
+                    foo::{bar: baz::[quux::"quuz"]]}
+                "#,
+            )?,
         )
     }
 
@@ -1413,13 +1273,7 @@ mod writer_tests {
                 writer.write_string("Hello")?;
                 writer.step_out()
             },
-            |reader| {
-                expect_list(reader);
-                reader.step_in()?;
-                expect_integer(reader, 42);
-                expect_string(reader, "Hello");
-                reader.step_out()
-            },
+            Element::read_all(r#"[42, "Hello"]"#)?,
         )
     }
 
@@ -1436,17 +1290,7 @@ mod writer_tests {
                 writer.write_string("foo")?;
                 writer.step_out()
             },
-            |reader| {
-                expect_list(reader);
-                reader.step_in()?;
-                expect_integer(reader, 42);
-                expect_list(reader);
-                reader.step_in()?;
-                expect_string(reader, "Hello");
-                reader.step_out()?;
-                expect_string(reader, "foo");
-                reader.step_out()
-            },
+            Element::read_all(r#"[42, ["Hello"], "foo"]"#)?,
         )
     }
 
@@ -1469,21 +1313,7 @@ mod writer_tests {
                 writer.write_null(IonType::Null)?;
                 writer.step_out() // End of top-level struct
             },
-            |reader| {
-                expect_struct(reader);
-                reader.step_in()?;
-                expect_bool(reader, true);
-                expect_field_name(reader, "foo");
-                expect_struct(reader);
-                expect_field_name(reader, "bar");
-                reader.step_in()?;
-                expect_integer(reader, 7);
-                expect_field_name(reader, "quux");
-                reader.step_out()?;
-                expect_null(reader);
-                expect_field_name(reader, "baz");
-                reader.step_out()
-            },
+            Element::read_all(r#"{foo: true, bar: {quux: 7}, baz: null}"#)?,
         )
     }
 }

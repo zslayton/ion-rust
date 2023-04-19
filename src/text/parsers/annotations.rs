@@ -46,7 +46,6 @@ pub(crate) fn annotation_delimiter(input: &str) -> IonParseResult<&str> {
 mod parse_annotations_tests {
     use rstest::*;
 
-    use crate::raw_symbol_token::{local_sid_token, text_token};
     use crate::types::SymbolId;
 
     use super::*;
@@ -63,7 +62,10 @@ mod parse_annotations_tests {
     #[case::quoted_interstitial_spaces("'foo'   ::", "foo")]
     #[case::quoted_all_spaces("   'foo'   ::   ", "foo")]
     fn test_parse_annotation(#[case] text: &str, #[case] expected: &str) {
-        assert_eq!(parse_annotation(text).unwrap().1, text_token(expected));
+        assert_eq!(
+            parse_annotation(text).unwrap().1,
+            RawSymbolToken::from(expected)
+        );
     }
 
     #[rstest]
@@ -73,6 +75,9 @@ mod parse_annotations_tests {
     #[case::symbol_id_interstitial_spaces("$10   ::", 10)]
     #[case::symbol_id_all_spaces("   $10   ::   ", 10)]
     fn test_parse_symbol_id_annotation(#[case] text: &str, #[case] expected: SymbolId) {
-        assert_eq!(parse_annotation(text).unwrap().1, local_sid_token(expected));
+        assert_eq!(
+            parse_annotation(text).unwrap().1,
+            RawSymbolToken::from(expected)
+        );
     }
 }

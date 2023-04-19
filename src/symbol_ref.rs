@@ -63,7 +63,7 @@ impl<'a> Ord for SymbolRefText<'a> {
 
 /// A reference to a fully resolved symbol. Like `Symbol` (a fully resolved symbol with a
 /// static lifetime), a `SymbolRef` may have known or undefined text.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Hash)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
 pub struct SymbolRef<'a> {
     text: SymbolRefText<'a>,
 }
@@ -92,6 +92,15 @@ impl<'a> SymbolRef<'a> {
     pub(crate) fn with_shared_text(text: Arc<str>) -> SymbolRef<'static> {
         SymbolRef {
             text: SymbolRefText::Shared(text),
+        }
+    }
+
+    pub fn to_owned(&self) -> Symbol {
+        let SymbolRef { text } = self;
+        match text {
+            SymbolRefText::Shared(arc_str) => Symbol::shared(Arc::clone(arc_str)),
+            SymbolRefText::Borrowed(text) => Symbol::owned(text.to_string()),
+            SymbolRefText::Unknown => Symbol::unknown_text(),
         }
     }
 }
@@ -158,6 +167,7 @@ impl<'borrow, 'data> AsSymbolRef for &'borrow SymbolRef<'data> {
     fn as_symbol_ref(&self) -> SymbolRef<'data> {
         // This is cheap; we're cloning either a `&str` (runtime no-op) or an `Arc<str>` (which
         // requires an atomic integer increment.)
+
         (*self).clone()
     }
 }
