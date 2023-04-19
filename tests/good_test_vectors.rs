@@ -11,8 +11,7 @@ use walkdir::WalkDir;
 use ion_rs::result::{decoding_error, IonResult};
 use ion_rs::StreamItem::Value;
 use ion_rs::{
-    IonReader, IonType, RawIonReader, Reader, ReaderBuilder, SequenceRef, StructRef, ValueReader,
-    ValueRef,
+    IonReader, RawIonReader, Reader, ReaderBuilder, SequenceRef, StructRef, ValueReader, ValueRef,
 };
 
 const GOOD_TEST_FILES_PATH: &str = "ion-tests/iontestdata/good/";
@@ -148,17 +147,17 @@ fn read_value<R: RawIonReader>(value_reader: &mut ValueReader<R>) -> IonResult<(
         Symbol(_) => {}
         Blob(_) => {}
         Clob(_) => {}
-        SExp(mut s) | List(mut s) => {
+        SExp(s) | List(s) => {
             return read_sequence(s);
         }
-        Struct(mut s) => {
+        Struct(s) => {
             return read_struct(s);
         }
     }
     Ok(())
 }
 
-fn read_sequence<R: RawIonReader>(mut sequence_ref: SequenceRef<R>) -> IonResult<()> {
+fn read_sequence<R: RawIonReader>(sequence_ref: SequenceRef<R>) -> IonResult<()> {
     let mut sequence_reader = sequence_ref.step_in()?;
     while let Some(mut value) = sequence_reader.next_element()? {
         read_value(&mut value)?;
@@ -166,7 +165,7 @@ fn read_sequence<R: RawIonReader>(mut sequence_ref: SequenceRef<R>) -> IonResult
     sequence_reader.step_out()
 }
 
-fn read_struct<R: RawIonReader>(mut struct_ref: StructRef<R>) -> IonResult<()> {
+fn read_struct<R: RawIonReader>(struct_ref: StructRef<R>) -> IonResult<()> {
     let mut struct_reader = struct_ref.step_in()?;
     while let Some(mut field) = struct_reader.next_field()? {
         field.read_name()?;

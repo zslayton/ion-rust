@@ -100,6 +100,11 @@ struct LstData {
     // because the `symbols` field of the LST can appear before the `imports` field but the `imports`
     // field MUST be processed first.
     symbols: Vec<Option<String>>,
+    // Keep track of whether we've already encountered a 'symbols' or 'imports' field in the current
+    // LST. If we have, finding a second one must result in an error.
+    found_symbols_field: bool,
+    found_imports_field: bool,
+    // TODO: The raw readers can now read a value more than once. Remove this.
     // At present, BlockingRawTextReader and BlockingRawBinaryReader cannot read the same value more than once.
     // When the SystemReader needs to read the current value as part of processing a local symbol
     // table, it must store a copy of that value in case the user requests it via `read_string()`,
@@ -114,7 +119,9 @@ impl LstData {
         LstData {
             is_append: false,
             symbols: vec![],
-            state: LstPosition::NotReadingAnLst,
+            state: NotReadingAnLst,
+            found_symbols_field: false,
+            found_imports_field: false,
             current_symbol: RawSymbolToken::SymbolId(0),
             current_string: String::new(),
             current_int: 0,
@@ -248,6 +255,12 @@ impl<R: RawIonReader> SystemReader<R> {
                         if field_name_token.matches(system_symbol_ids::IMPORTS, "imports") {
                             self.move_to_lst_imports_field(ion_type)?;
                         } else if field_name_token.matches(system_symbol_ids::SYMBOLS, "symbols") {
+                            if self.lst.found_symbols_field {
+                                return decoding_error(
+                                    "found more than one 'symbols' field in local symbol table",
+                                );
+                            }
+                            self.lst.found_symbols_field = true;
                             self.lst.state = AtLstSymbols;
                         } else {
                             // This field has no effect on our handling of the LST.
@@ -265,7 +278,7 @@ impl<R: RawIonReader> SystemReader<R> {
                 }
             }
             ProcessingLstImports => {
-                todo!("Support shared symbol table imports.");
+                return decoding_error("importing shared symbol tables is not yet supported");
             }
             ProcessingLstSymbols => {
                 // We're in the `symbols` list.
@@ -294,6 +307,10 @@ impl<R: RawIonReader> SystemReader<R> {
 
     // Called when the system reader advances to the `imports` field of an LST.
     fn move_to_lst_imports_field(&mut self, ion_type: IonType) -> IonResult<()> {
+        if self.lst.found_imports_field {
+            return decoding_error("found more than one 'imports' field in local symbol table");
+        }
+        self.lst.found_imports_field = true;
         self.lst.state = AtLstImports;
         match ion_type {
             IonType::Symbol => {
@@ -314,7 +331,7 @@ impl<R: RawIonReader> SystemReader<R> {
                 // be processed when the user steps into/through it or when they try to skip over
                 // it, not when it's first encountered. For now though, we fail because this
                 // feature is not yet supported.
-                todo!("Support shared symbol table imports.");
+                return decoding_error("importing shared symbol tables is not yet supported");
             }
             _ => {
                 // Non-list, non-symbol values for the `imports` field are ignored.
@@ -586,6 +603,8 @@ impl<R: RawIonReader> SystemReader<R> {
                 self.finish_reading_current_level()?;
                 self.add_lst_symbols_to_current_symbol_table();
                 self.lst.is_append = false;
+                self.lst.found_symbols_field = false;
+                self.lst.found_imports_field = false;
                 new_lst_state = NotReadingAnLst;
             }
             ProcessingLstImports | ProcessingLstSymbols | ProcessingLstOpenContent => {

@@ -216,7 +216,7 @@ mod tests {
         binary_writer.flush()?;
 
         let elements = Element::read_all(buffer)?;
-        let expected_elements = Element::read_all(r#"{foo: "bar"}"#)?;
+        let expected_elements = Element::read_all(r#"{foo: bar}"#)?;
         assert_eq!(elements, expected_elements);
         Ok(())
     }

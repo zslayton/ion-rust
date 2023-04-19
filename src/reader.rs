@@ -6,11 +6,10 @@ use delegate::delegate;
 
 use crate::binary::constants::v1_0::IVM;
 use crate::data_source::ToIonDataSource;
-use crate::raw_reader::{RawIonReader, RawStreamItem};
+use crate::raw_reader::RawIonReader;
 use crate::result::{decoding_error, IonResult};
 use crate::stream_reader::IonReader;
 use crate::symbol_table::SymbolTable;
-use crate::types::value_ref::ValueRef;
 use crate::value_reader::ValueReader;
 use crate::{BlockingRawBinaryReader, BlockingRawTextReader, SystemReader};
 use std::fmt::{Display, Formatter};
@@ -229,7 +228,7 @@ mod tests {
 
     use super::*;
     use crate::binary::constants::v1_0::IVM;
-    use crate::{BlockingRawBinaryReader, SymbolRef};
+    use crate::{BlockingRawBinaryReader, SymbolRef, ValueRef};
 
     use crate::result::IonResult;
     use crate::StreamItem::Value;
@@ -252,7 +251,7 @@ mod tests {
 
     // Prepends an Ion 1.0 IVM to the provided data and then creates a BinaryIonCursor over it
     fn raw_binary_reader_for(bytes: &[u8]) -> BlockingRawBinaryReader<TestDataSource> {
-        use RawStreamItem::*;
+        use crate::RawStreamItem::*;
         let mut raw_reader =
             BlockingRawBinaryReader::new(data_source_for(bytes)).expect("unable to create reader");
         assert_eq!(raw_reader.ion_type(), None);

@@ -1149,13 +1149,14 @@ mod writer_tests {
 
     #[test]
     fn binary_writer_mixed_scalars() -> IonResult<()> {
+        use crate::Symbol;
         // The tests above write streams containing a single type of Ion value. This test writes
         // a mix.
         binary_writer_test(
             |writer| {
                 writer.write_i64(42)?;
                 writer.write_string("Hello")?;
-                writer.write_symbol_id(12)?;
+                writer.write_symbol_id(7)?;
                 writer.write_f32(2.5)?;
                 writer.write_f64(7.5)?;
                 writer.write_bool(false)
@@ -1163,7 +1164,7 @@ mod writer_tests {
             ion_seq!(
                 42
                 "Hello"
-                12
+                Symbol::from("symbols")
                 2.5f64
                 7.5f64
                 false
@@ -1252,7 +1253,7 @@ mod writer_tests {
             },
             Element::read_all(
                 r#"
-                    foo::{bar: baz::[quux::"quuz"]]}
+                    foo::{bar: baz::[quux::"quuz"]}
                 "#,
             )?,
         )
