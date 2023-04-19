@@ -63,7 +63,7 @@ impl<'r, R: RawIonReader> ValueReader<'r, R> {
     }
 
     // TODO: step_out() on Drop?
-    pub fn annotations<'a>(&'a mut self) -> impl Iterator<Item = IonResult<SymbolRef>> + 'a {
+    pub fn annotations(&mut self) -> impl Iterator<Item = IonResult<SymbolRef>> {
         // The system reader resolves each annotation for us
         self.reader.annotations()
     }
@@ -111,7 +111,7 @@ impl<'r, R: RawIonReader> StructReader<'r, R> {
     }
 
     pub fn next_field(&mut self) -> IonResult<Option<FieldReader<R>>> {
-        if let None = advance_to_next_user_value(self.reader)? {
+        if advance_to_next_user_value(self.reader)?.is_none() {
             return Ok(None);
         }
         return Ok(Some(FieldReader::new(self.reader)));
@@ -136,7 +136,7 @@ impl<'r, R: RawIonReader> SequenceReader<'r, R> {
     }
 
     pub fn read_next_element(&mut self) -> IonResult<Option<ValueRef<R>>> {
-        if let None = advance_to_next_user_value(self.reader)? {
+        if advance_to_next_user_value(self.reader)?.is_none() {
             return Ok(None);
         }
         Ok(Some(self.reader.read_value()?))
