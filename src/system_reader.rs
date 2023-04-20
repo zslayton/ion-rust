@@ -600,17 +600,40 @@ impl<R: RawIonReader> SystemReader<R> {
     }
 
     pub fn read_value(&mut self) -> IonResult<ValueRef<R>> {
-        use crate::types::value_ref::RawValueRef::*;
+        // Maps a RawValueRef from the underlying RawIonReader to a resolved `ValueRef`.
+        //
+        // XXX: This method's implementation is unusual due to a limitation in the borrow checker.
+        //      If a mutable reference can be returned from a scope (in this case: `self`), the
+        //      the borrow checker can't tell which branches that return other references should
+        //      or should not be allowed.
+        //
+        //      See: https://github.com/rust-lang/rust/issues/51545
+        //
+        //      Ideally, we would be able to do a single match on `self.raw_reader.read_value()`.
+        //      Someday when Polonius[1] takes over, we can revise it. In the meantime, we handle
+        //      the scalar and container types separately. We do this because the scalar variants
+        //      of RawValueRef contain data, while the container variants do not. This means that
+        //      the scalar variants need to borrow from the reader, but the container variants
+        //      can be (very manually) mapped to ValueRef.
+        //
+        //      [1] https://github.com/rust-lang/polonius
 
+        // Get the Ion type of the current stream value.
         let ion_type = match self.ion_type() {
             None => return illegal_operation("system reader is not on a value"),
             Some(ion_type) => ion_type,
         };
 
+        // Manually detect typed nulls; this would normally be taken care of by the `match`
+        // on `self.raw_reader.read_value()`, but we have to do this up front before any
+        // new references to `self` are created.
         if self.is_null() {
             return Ok(ValueRef::Null(ion_type));
         }
 
+        // Instead of calling `read_value()` (which creates a reference to `self`), examine the
+        // Ion type and return the appropriate ValueRef. The container variants of ValueRef
+        // hold a mutable reference to self to allow the caller to traverse the container as needed.
         'container: {
             let value_ref = match ion_type {
                 IonType::List => ValueRef::List(SequenceRef::new(self)),
@@ -621,28 +644,9 @@ impl<R: RawIonReader> SystemReader<R> {
             return Ok(value_ref);
         }
 
-        let system_reader: &SystemReader<R> = self;
-        let value_ref = match system_reader.raw_reader.read_value()? {
-            // Scalar type mappings are straightforward with the exception of `Symbol`, which needs
-            // to perform resolution before returning.
-            Null(ion_type) => ValueRef::Null(ion_type),
-            Bool(b) => ValueRef::Bool(b),
-            Int(i) => ValueRef::Int(i),
-            Float(f) => ValueRef::Float(f),
-            Decimal(d) => ValueRef::Decimal(d),
-            Timestamp(t) => ValueRef::Timestamp(t),
-            Symbol(s) => ValueRef::Symbol(s.resolve(system_reader.symbol_table())?.to_owned()),
-            String(s) => ValueRef::String(s),
-            Clob(c) => ValueRef::Clob(c),
-            Blob(b) => ValueRef::Blob(b),
-            _ => unreachable!("all cases covered"),
-        };
-        Ok(value_ref)
-    }
-
-    fn read_scalar_value(&self) -> IonResult<Option<ValueRef<R>>> {
+        // With the containers (and branches that return `self`) out of the way, we can now call
+        // `read_value()` and match on its contents.
         use crate::types::value_ref::RawValueRef::*;
-
         let value_ref = match self.raw_reader.read_value()? {
             // Scalar type mappings are straightforward with the exception of `Symbol`, which needs
             // to perform resolution before returning.
@@ -656,21 +660,9 @@ impl<R: RawIonReader> SystemReader<R> {
             String(s) => ValueRef::String(s),
             Clob(c) => ValueRef::Clob(c),
             Blob(b) => ValueRef::Blob(b),
-            _ => return Ok(None),
+            _ => unreachable!("container types handled above"),
         };
-        Ok(Some(value_ref))
-    }
-
-    fn read_container_value(&mut self) -> IonResult<Option<ValueRef<R>>> {
-        use crate::types::value_ref::RawValueRef::*;
-
-        let value_ref = match self.raw_reader.read_value()? {
-            List => ValueRef::List(SequenceRef::new(self)),
-            SExp => ValueRef::SExp(SequenceRef::new(self)),
-            Struct => ValueRef::Struct(StructRef::new(self)),
-            _ => return Ok(None),
-        };
-        Ok(Some(value_ref))
+        Ok(value_ref)
     }
 }
 
