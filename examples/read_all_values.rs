@@ -71,7 +71,7 @@ fn read_all_values<R: RawIonReader>(reader: &mut R) -> IonResult<usize> {
                         let _int = reader.read_i64()?;
                     }
                     Float => {
-                        let _float = reader.read_f64()?;
+                        let _float = reader.read_float()?;
                     }
                     Decimal => {
                         let _decimal = reader.read_decimal()?;

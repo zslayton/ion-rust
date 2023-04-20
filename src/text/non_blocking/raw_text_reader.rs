@@ -820,14 +820,7 @@ impl<A: AsRef<[u8]> + Expandable> RawIonReader for RawTextReader<A> {
         }
     }
 
-    fn read_f32(&mut self) -> IonResult<f32> {
-        match self.current_value.as_ref().map(|current| current.value()) {
-            Some(TextValue::Float(value)) => Ok(*value as f32),
-            _ => Err(self.expected("float value")),
-        }
-    }
-
-    fn read_f64(&mut self) -> IonResult<f64> {
+    fn read_float(&mut self) -> IonResult<f64> {
         match self.current_value.as_ref().map(|current| current.value()) {
             Some(TextValue::Float(value)) => Ok(*value),
             _ => Err(self.expected("float value")),
@@ -1245,7 +1238,7 @@ mod reader_tests {
         assert_eq!(reader.read_i64()?, 5);
 
         next_type(reader, IonType::Float, false);
-        assert_eq!(reader.read_f64()?, 5.0f64);
+        assert_eq!(reader.read_float()?, 5.0f64);
 
         next_type(reader, IonType::Decimal, false);
         assert_eq!(reader.read_decimal()?, Decimal::new(55i32, -1i64));
@@ -1369,7 +1362,7 @@ mod reader_tests {
         );
 
         next_type(reader, IonType::Float, false);
-        assert_eq!(reader.read_f64()?, 5.0f64);
+        assert_eq!(reader.read_float()?, 5.0f64);
         annotations_eq(reader, ["jupiter"]);
 
         next_type(reader, IonType::Decimal, false);

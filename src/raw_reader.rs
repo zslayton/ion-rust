@@ -76,13 +76,9 @@ pub trait RawIonReader {
     /// [IonError].
     fn read_int(&mut self) -> IonResult<Int>;
 
-    /// Attempts to read the current item as an Ion float and return it as an f32. If the current
-    /// item is not a float or an IO error is encountered while reading, returns [IonError].
-    fn read_f32(&mut self) -> IonResult<f32>;
-
     /// Attempts to read the current item as an Ion float and return it as an f64. If the current
     /// item is not a float or an IO error is encountered while reading, returns [IonError].
-    fn read_f64(&mut self) -> IonResult<f64>;
+    fn read_float(&mut self) -> IonResult<f64>;
 
     /// Attempts to read the current item as an Ion decimal and return it as a [Decimal]. If the current
     /// item is not a decimal or an IO error is encountered while reading, returns [IonError].
@@ -246,12 +242,8 @@ impl<R: RawIonReader + ?Sized> RawIonReader for Box<R> {
         (**self).read_int()
     }
 
-    fn read_f32(&mut self) -> IonResult<f32> {
-        (**self).read_f32()
-    }
-
-    fn read_f64(&mut self) -> IonResult<f64> {
-        (**self).read_f64()
+    fn read_float(&mut self) -> IonResult<f64> {
+        (**self).read_float()
     }
 
     fn read_decimal(&mut self) -> IonResult<Decimal> {
@@ -357,12 +349,8 @@ impl<'a, R: RawIonReader + ?Sized> RawIonReader for &'a mut R {
         (**self).read_int()
     }
 
-    fn read_f32(&mut self) -> IonResult<f32> {
-        (**self).read_f32()
-    }
-
-    fn read_f64(&mut self) -> IonResult<f64> {
-        (**self).read_f64()
+    fn read_float(&mut self) -> IonResult<f64> {
+        (**self).read_float()
     }
 
     fn read_decimal(&mut self) -> IonResult<Decimal> {

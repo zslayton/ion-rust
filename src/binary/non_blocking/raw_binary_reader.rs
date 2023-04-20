@@ -846,10 +846,10 @@ impl<A: AsRef<[u8]>> RawIonReader for RawBinaryReader<A> {
             IonType::Null => self.read_null().map(RawValueRef::Null),
             IonType::Bool => self.read_bool().map(RawValueRef::Bool),
             IonType::Int => self.read_int().map(RawValueRef::Int),
-            IonType::Float => self.read_f64().map(RawValueRef::Float),
+            IonType::Float => self.read_float().map(RawValueRef::Float),
             IonType::Decimal => self.read_decimal().map(RawValueRef::Decimal),
             IonType::Timestamp => self.read_timestamp().map(RawValueRef::Timestamp),
-            IonType::Symbol => illegal_operation("the RawBinaryReader cannot resolve symbol text"),
+            IonType::Symbol => self.read_symbol().map(RawValueRef::Symbol),
             IonType::String => self.read_str().map(RawValueRef::String),
             IonType::Clob => self.read_clob_bytes().map(RawValueRef::Clob),
             IonType::Blob => self.read_blob_bytes().map(RawValueRef::Blob),
@@ -917,11 +917,7 @@ impl<A: AsRef<[u8]>> RawIonReader for RawBinaryReader<A> {
         Ok(value)
     }
 
-    fn read_f32(&mut self) -> IonResult<f32> {
-        self.read_f64().map(|f| f as f32)
-    }
-
-    fn read_f64(&mut self) -> IonResult<f64> {
+    fn read_float(&mut self) -> IonResult<f64> {
         let (encoded_value, bytes) = self.value_and_bytes(IonType::Float)?;
         let number_of_bytes = encoded_value.value_length();
         let value = match number_of_bytes {
@@ -1604,11 +1600,11 @@ mod tests {
         ];
         let mut reader = RawBinaryReader::new(data);
         expect_value(reader.next(), IonType::Float);
-        assert_eq!(reader.read_f64()?, 5.5f64);
+        assert_eq!(reader.read_float()?, 5.5f64);
         expect_value(reader.next(), IonType::Float);
-        assert_eq!(reader.read_f64()?, 1200f64);
+        assert_eq!(reader.read_float()?, 1200f64);
         expect_value(reader.next(), IonType::Float);
-        assert_eq!(reader.read_f64()?, -8.125f64);
+        assert_eq!(reader.read_float()?, -8.125f64);
         // Nothing else in the buffer
         expect_eof(reader.next());
         Ok(())

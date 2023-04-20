@@ -154,11 +154,11 @@ impl<'a, R: RawIonReader + 'a> ElementLoader<'a, R> {
     fn materialize_sequence(sequence: SequenceRef<R>) -> IonResult<Sequence> {
         let mut child_elements = Vec::new();
 
-        let mut seq_reader = sequence.step_in()?;
+        let mut seq_reader = sequence.reader()?;
         while let Some(mut value) = seq_reader.next_element()? {
             child_elements.push(Self::materialize_value(&mut value)?);
         }
-        seq_reader.step_out()?;
+        seq_reader.close()?;
         Ok(child_elements.into())
     }
 
@@ -167,14 +167,14 @@ impl<'a, R: RawIonReader + 'a> ElementLoader<'a, R> {
     /// The reader MUST be positioned over a struct when this is called.
     fn materialize_struct(struct_ref: StructRef<R>) -> IonResult<Struct> {
         let mut child_elements = Vec::new();
-        let mut struct_reader = struct_ref.step_in()?;
+        let mut struct_reader = struct_ref.reader()?;
         while let Some(mut field) = struct_reader.next_field()? {
             child_elements.push((
                 field.read_name()?.to_owned(),
                 Self::materialize_value(&mut field.value())?,
             ))
         }
-        struct_reader.step_out()?;
+        struct_reader.close()?;
         Ok(Struct::from_iter(child_elements.into_iter()))
     }
 }

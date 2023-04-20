@@ -713,8 +713,7 @@ impl<R: RawIonReader> SystemReader<R> {
             pub fn read_bool(&mut self) -> IonResult<bool>;
             pub fn read_int(&mut self) -> IonResult<Int>;
             pub fn read_i64(&mut self) -> IonResult<i64>;
-            pub fn read_f32(&mut self) -> IonResult<f32>;
-            pub fn read_f64(&mut self) -> IonResult<f64>;
+            pub fn read_float(&mut self) -> IonResult<f64>;
             pub fn read_decimal(&mut self) -> IonResult<Decimal>;
             pub fn read_blob(&mut self) -> IonResult<Blob>;
             pub fn read_blob_bytes(&mut self) -> IonResult<&[u8]>;
@@ -736,7 +735,7 @@ impl<R: RawIonReader> SystemReader<R> {
                     IonType::Null => unreachable!("null is handled in an earlier match arm"),
                     IonType::Bool => self.read_bool().map(ValueRef::Bool),
                     IonType::Int => self.read_int().map(ValueRef::Int),
-                    IonType::Float => self.read_f64().map(ValueRef::Float),
+                    IonType::Float => self.read_float().map(ValueRef::Float),
                     IonType::Decimal => self.read_decimal().map(ValueRef::Decimal),
                     IonType::Timestamp => self.read_timestamp().map(ValueRef::Timestamp),
                     IonType::Symbol => self.read_symbol().map(ValueRef::Symbol),

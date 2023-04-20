@@ -18,7 +18,7 @@ impl<'r, R: RawIonReader> StructRef<'r, R> {
         StructRef { reader }
     }
 
-    pub fn step_in(self) -> IonResult<StructReader<'r, R>> {
+    pub fn reader(self) -> IonResult<StructReader<'r, R>> {
         let StructRef { reader } = self;
         reader.step_in()?;
         Ok(StructReader::new(reader))
@@ -34,7 +34,7 @@ impl<'r, R: RawIonReader> SequenceRef<'r, R> {
         SequenceRef { reader }
     }
 
-    pub fn step_in(self) -> IonResult<SequenceReader<'r, R>> {
+    pub fn reader(self) -> IonResult<SequenceReader<'r, R>> {
         let SequenceRef { reader } = self;
         reader.step_in()?;
         Ok(SequenceReader::new(reader))
@@ -117,7 +117,7 @@ impl<'r, R: RawIonReader> StructReader<'r, R> {
         return Ok(Some(FieldReader::new(self.reader)));
     }
 
-    pub fn step_out(self) -> IonResult<()> {
+    pub fn close(self) -> IonResult<()> {
         self.reader.step_out()
     }
 }
@@ -142,7 +142,7 @@ impl<'r, R: RawIonReader> SequenceReader<'r, R> {
         Ok(Some(self.reader.read_value()?))
     }
 
-    pub fn step_out(self) -> IonResult<()> {
+    pub fn close(self) -> IonResult<()> {
         self.reader.step_out()
     }
 }

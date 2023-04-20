@@ -294,7 +294,7 @@ mod tests {
 
         if let Value(mut v) = reader.next()? {
             if let ValueRef::Struct(s) = v.read()? {
-                let mut struct_reader = s.step_in()?;
+                let mut struct_reader = s.reader()?;
 
                 let mut field1 = struct_reader
                     .next_field()?

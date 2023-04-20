@@ -233,11 +233,7 @@ impl RawIonReader for ElementStreamReader {
         }
     }
 
-    fn read_f32(&mut self) -> IonResult<f32> {
-        self.current_value_as("float value", |v| v.as_float().map(|f| f as f32))
-    }
-
-    fn read_f64(&mut self) -> IonResult<f64> {
+    fn read_float(&mut self) -> IonResult<f64> {
         self.current_value_as("float value", |v| v.as_float())
     }
 
@@ -377,7 +373,7 @@ impl RawIonReader for ElementStreamReader {
             IonType::Null => self.read_null().map(RawValueRef::Null),
             IonType::Bool => self.read_bool().map(RawValueRef::Bool),
             IonType::Int => self.read_int().map(RawValueRef::Int),
-            IonType::Float => self.read_f64().map(RawValueRef::Float),
+            IonType::Float => self.read_float().map(RawValueRef::Float),
             IonType::Decimal => self.read_decimal().map(RawValueRef::Decimal),
             IonType::Timestamp => self.read_timestamp().map(RawValueRef::Timestamp),
             IonType::Symbol => self.read_symbol().map(RawValueRef::Symbol),
@@ -522,7 +518,7 @@ mod reader_tests {
         next_type(reader, IonType::Clob, false);
         assert_eq!(reader.read_clob()?, Clob::from("hello"));
         next_type(reader, IonType::Float, false);
-        assert_eq!(reader.read_f64()?, 4.5);
+        assert_eq!(reader.read_float()?, 4.5);
         next_type(reader, IonType::Decimal, false);
         assert_eq!(reader.read_decimal()?, Decimal::new(45, -1));
         next_type(reader, IonType::Timestamp, false);
