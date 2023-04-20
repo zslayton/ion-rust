@@ -1,8 +1,8 @@
 use ion_rs::binary::non_blocking::raw_binary_reader::RawBinaryReader;
 use ion_rs::raw_reader::RawStreamItem;
 use ion_rs::result::IonResult;
-use ion_rs::RawIonReader;
 use ion_rs::{BlockingRawBinaryReader, IonType};
+use ion_rs::{RawIonReader, ReadRawValueRef};
 use memmap::MmapOptions;
 use std::fs::File;
 use std::process::exit;
@@ -68,13 +68,13 @@ fn read_all_values<R: RawIonReader>(reader: &mut R) -> IonResult<usize> {
                 match ion_type {
                     Struct | List | SExp => reader.step_in()?,
                     String => {
-                        let _string = reader.read_str()?;
+                        let _string = reader.read_string()?;
                     }
                     Symbol => {
                         let _symbol_id = reader.read_symbol()?;
                     }
                     Int => {
-                        let _int = reader.read_i64()?;
+                        let _int = reader.read_int()?;
                     }
                     Float => {
                         let _float = reader.read_float()?;

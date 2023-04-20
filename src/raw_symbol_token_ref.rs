@@ -5,7 +5,7 @@ use crate::types::SymbolId;
 use crate::{IonResult, Symbol, SymbolRef, SymbolTable};
 
 /// Like RawSymbolToken, but the Text variant holds a borrowed reference instead of a String.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum RawSymbolTokenRef<'a> {
     SymbolId(SymbolId),
     Text(&'a str),

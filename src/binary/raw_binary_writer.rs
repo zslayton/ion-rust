@@ -903,7 +903,7 @@ impl<W: Write> IonWriter for RawBinaryWriter<W> {
 
 #[cfg(test)]
 mod writer_tests {
-    use crate::{ion_seq, RawIonReader, ValueRef};
+    use crate::ion_seq;
 
     use rstest::*;
 
@@ -933,7 +933,10 @@ mod writer_tests {
         writer.flush()?;
 
         let actual_elements = Element::read_all(buffer)?;
-        assert_eq!(actual_elements, expected_elements);
+        assert_eq!(
+            actual_elements, expected_elements,
+            "actual={actual_elements}\nexpected={expected_elements}"
+        );
         Ok(())
     }
 

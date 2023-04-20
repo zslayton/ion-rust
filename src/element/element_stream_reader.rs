@@ -1,14 +1,11 @@
-use crate::result::{decoding_error, illegal_operation, illegal_operation_raw};
+use crate::result::{illegal_operation, illegal_operation_raw};
 use crate::text::parent_container::ParentContainer;
 
 use crate::element::iterators::SymbolsIterator;
-use crate::element::{Blob, Clob, Element};
+use crate::element::{Element, Value};
 use crate::raw_symbol_token_ref::AsRawSymbolTokenRef;
 use crate::types::value_ref::RawValueRef;
-use crate::{
-    Decimal, Int, IonError, IonResult, IonType, RawIonReader, RawStreamItem, RawSymbolTokenRef,
-    Str, Symbol, Timestamp,
-};
+use crate::{IonError, IonResult, IonType, RawIonReader, RawStreamItem, RawSymbolTokenRef, Symbol};
 use std::fmt::Display;
 use std::mem;
 
@@ -204,93 +201,6 @@ impl RawIonReader for ElementStreamReader {
         }
     }
 
-    // TODO: See if the match statements for read_*() below could be simplified
-
-    fn read_null(&mut self) -> IonResult<IonType> {
-        match self.current_value.as_ref() {
-            Some(element) if element.is_null() => Ok(element.ion_type()),
-            _ => Err(self.expected("null value")),
-        }
-    }
-
-    fn read_bool(&mut self) -> IonResult<bool> {
-        self.current_value_as("bool value", |v| v.as_bool())
-    }
-
-    fn read_int(&mut self) -> IonResult<Int> {
-        self.current_value_as("int value", |v| v.as_int().map(|i| i.to_owned()))
-    }
-
-    fn read_i64(&mut self) -> IonResult<i64> {
-        match self.current_value.as_ref() {
-            Some(element) if element.as_int().is_some() => match element.as_int().unwrap() {
-                Int::I64(value) => Ok(*value),
-                Int::BigInt(value) => {
-                    decoding_error(format!("Integer {value} is too large to fit in an i64."))
-                }
-            },
-            _ => Err(self.expected("int value")),
-        }
-    }
-
-    fn read_float(&mut self) -> IonResult<f64> {
-        self.current_value_as("float value", |v| v.as_float())
-    }
-
-    fn read_decimal(&mut self) -> IonResult<Decimal> {
-        self.current_value_as("decimal value", |v| v.as_decimal().map(|i| i.to_owned()))
-    }
-
-    fn read_string(&mut self) -> IonResult<Str> {
-        match self.current_value.as_ref() {
-            Some(element) if element.as_text().is_some() => Ok(element.as_text().unwrap().into()),
-            _ => Err(self.expected("string value")),
-        }
-    }
-
-    fn read_str(&mut self) -> IonResult<&str> {
-        match self.current_value.as_ref() {
-            Some(element) if element.as_text().is_some() => Ok(element.as_text().unwrap()),
-            _ => Err(self.expected("string value")),
-        }
-    }
-
-    fn read_symbol(&mut self) -> IonResult<RawSymbolTokenRef> {
-        if let Some(symbol) = self.current_value.as_ref().and_then(|e| e.as_symbol()) {
-            Ok(symbol.as_raw_symbol_token_ref())
-        } else {
-            Err(self.expected("symbol value"))
-        }
-    }
-
-    fn read_blob_bytes(&mut self) -> IonResult<&[u8]> {
-        match self.current_value.as_ref() {
-            Some(element) if element.as_blob().is_some() => Ok(element.as_blob().unwrap()),
-            _ => Err(self.expected("blog value")),
-        }
-    }
-
-    fn read_clob_bytes(&mut self) -> IonResult<&[u8]> {
-        match self.current_value.as_ref() {
-            Some(element) if element.as_clob().is_some() => Ok(element.as_clob().unwrap()),
-            _ => Err(self.expected("clob value")),
-        }
-    }
-
-    fn read_blob(&mut self) -> IonResult<Blob> {
-        self.read_blob_bytes().map(Blob::from)
-    }
-
-    fn read_clob(&mut self) -> IonResult<Clob> {
-        self.read_clob_bytes().map(Clob::from)
-    }
-
-    fn read_timestamp(&mut self) -> IonResult<Timestamp> {
-        self.current_value_as("timestamp value", |v| {
-            v.as_timestamp().map(|i| i.to_owned())
-        })
-    }
-
     fn step_in(&mut self) -> IonResult<()> {
         match &self.current_value {
             Some(value) if value.ion_type().is_container() => {
@@ -364,31 +274,35 @@ impl RawIonReader for ElementStreamReader {
         (1, 0)
     }
 
-    fn read_value(&mut self) -> IonResult<RawValueRef> {
-        let ion_type = match self.current_value.as_ref() {
-            Some(element) => element.ion_type(),
+    fn read_value(&self) -> IonResult<RawValueRef> {
+        let current_element = match self.current_value.as_ref() {
             None => return illegal_operation("the reader is not currently positioned on a value"),
+            Some(value) => value,
         };
-        match ion_type {
-            IonType::Null => self.read_null().map(RawValueRef::Null),
-            IonType::Bool => self.read_bool().map(RawValueRef::Bool),
-            IonType::Int => self.read_int().map(RawValueRef::Int),
-            IonType::Float => self.read_float().map(RawValueRef::Float),
-            IonType::Decimal => self.read_decimal().map(RawValueRef::Decimal),
-            IonType::Timestamp => self.read_timestamp().map(RawValueRef::Timestamp),
-            IonType::Symbol => self.read_symbol().map(RawValueRef::Symbol),
-            IonType::String => self.read_str().map(RawValueRef::String),
-            IonType::Clob => self.read_clob_bytes().map(RawValueRef::Clob),
-            IonType::Blob => self.read_blob_bytes().map(RawValueRef::Blob),
-            IonType::List => Ok(RawValueRef::List),
-            IonType::SExp => Ok(RawValueRef::SExp),
-            IonType::Struct => Ok(RawValueRef::Struct),
-        }
+
+        use Value::*;
+        let value = match current_element.value() {
+            Null(ion_type) => RawValueRef::Null(*ion_type),
+            Bool(b) => RawValueRef::Bool(*b),
+            Int(i) => RawValueRef::Int(i.clone()),
+            Float(f) => RawValueRef::Float(*f),
+            Decimal(d) => RawValueRef::Decimal(d.clone()),
+            Timestamp(t) => RawValueRef::Timestamp(t.clone()),
+            Symbol(s) => RawValueRef::Symbol(s.as_raw_symbol_token_ref()),
+            String(s) => RawValueRef::String(s.as_ref()),
+            Clob(c) => RawValueRef::Clob(c.as_ref()),
+            Blob(b) => RawValueRef::Blob(b.as_ref()),
+            List(_l) => RawValueRef::List,
+            SExp(_s) => RawValueRef::SExp,
+            Struct(_s) => RawValueRef::Struct,
+        };
+        Ok(value)
     }
 }
 
 #[cfg(test)]
 mod reader_tests {
+    use crate::element::{Blob, Clob};
     use rstest::*;
 
     use super::*;
@@ -397,6 +311,7 @@ mod reader_tests {
     use crate::types::timestamp::Timestamp;
 
     use crate::IonType;
+    use crate::ReadRawValueRef;
 
     fn load_element(text: &str) -> Element {
         Element::read_one(text.as_bytes()).expect("parsing failed unexpectedly")
@@ -421,7 +336,7 @@ mod reader_tests {
         next_type(reader, IonType::List, false);
         reader.step_in()?;
         next_type(reader, IonType::Int, false);
-        assert_eq!(reader.read_i64()?, 1);
+        assert_eq!(reader.read_int()?, 1);
         reader.step_out()?;
         // This should skip 2, 3 and reach end of the element
         // Asking for next here should result in `Nothing`
@@ -495,7 +410,7 @@ mod reader_tests {
         assert_eq!(reader.field_name()?, RawSymbolTokenRef::Text("bar"));
         reader.step_in()?;
         next_type(reader, IonType::Int, false);
-        assert_eq!(reader.read_i64()?, 5);
+        assert_eq!(reader.read_int()?, 5);
         reader.step_out()?;
         assert_eq!(reader.next()?, RawStreamItem::Nothing);
         reader.step_out()?;
@@ -514,9 +429,9 @@ mod reader_tests {
         next_type(reader, IonType::List, false);
         reader.step_in()?;
         next_type(reader, IonType::Blob, false);
-        assert_eq!(reader.read_blob()?, Blob::from("encoded"));
+        assert_eq!(reader.read_blob()?, "encoded".as_bytes());
         next_type(reader, IonType::Clob, false);
-        assert_eq!(reader.read_clob()?, Clob::from("hello"));
+        assert_eq!(reader.read_clob()?, "hello".as_bytes());
         next_type(reader, IonType::Float, false);
         assert_eq!(reader.read_float()?, 4.5);
         next_type(reader, IonType::Decimal, false);
@@ -529,7 +444,7 @@ mod reader_tests {
         next_type(reader, IonType::Symbol, false);
         assert_eq!(reader.read_symbol()?, RawSymbolTokenRef::Text("foo"));
         next_type(reader, IonType::String, false);
-        assert_eq!(reader.read_string()?, "hi!".to_string());
+        assert_eq!(reader.read_string()?, "hi!");
         reader.step_out()?;
         Ok(())
     }
@@ -607,10 +522,10 @@ mod reader_tests {
         reader.step_in()?;
         assert_eq!(reader.next()?, RawStreamItem::Value(IonType::Int));
         assert_eq!(reader.field_name()?, RawSymbolTokenRef::Text("a"));
-        assert_eq!(reader.read_i64()?, 1);
+        assert_eq!(reader.read_int()?, 1);
         assert_eq!(reader.next()?, RawStreamItem::Value(IonType::Int));
         assert_eq!(reader.field_name()?, RawSymbolTokenRef::Text("b"));
-        assert_eq!(reader.read_i64()?, 2);
+        assert_eq!(reader.read_int()?, 2);
         reader.step_out()?;
 
         assert_eq!(reader.next()?, RawStreamItem::Value(IonType::Struct));

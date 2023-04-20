@@ -520,7 +520,7 @@ impl<A: AsRef<[u8]>> RawBinaryReader<A> {
     /// to read a series of encoding primitives from the slice.
     #[inline]
     fn value_and_buffer(
-        &mut self,
+        &self,
         expected_ion_type: IonType,
     ) -> IonResult<(&EncodedValue, BinaryBuffer<&[u8]>)> {
         let (encoded_value, bytes) = self.value_and_bytes(expected_ion_type)?;
@@ -532,13 +532,13 @@ impl<A: AsRef<[u8]>> RawBinaryReader<A> {
     /// that string's *UNVALIDATED* utf-8 bytes. This method is available for performance optimization
     /// in scenarios where utf-8 validation may be unnecessary and/or a bottleneck. It is strongly
     /// recommended that you use [read_str](Self::read_str) unless absolutely necessary.
-    fn read_str_bytes(&mut self) -> IonResult<&[u8]> {
+    fn read_str_bytes(&self) -> IonResult<&[u8]> {
         let (_encoded_value, bytes) = self.value_and_bytes(IonType::String)?;
         Ok(bytes)
     }
 
     /// If the reader is currently positioned on a symbol value, parses that value into a `SymbolId`.
-    pub fn read_symbol_id(&mut self) -> IonResult<SymbolId> {
+    pub fn read_symbol_id(&self) -> IonResult<SymbolId> {
         let (_encoded_value, bytes) = self.value_and_bytes(IonType::Symbol)?;
         if bytes.len() > mem::size_of::<usize>() {
             return decoding_error("found a symbol Id that was too large to fit in a usize");
@@ -546,6 +546,220 @@ impl<A: AsRef<[u8]>> RawBinaryReader<A> {
         let magnitude = DecodedUInt::small_uint_from_slice(bytes);
         // This cast is safe because we've confirmed the value was small enough to fit in a usize.
         Ok(magnitude as usize)
+    }
+
+    fn read_null(&self) -> IonResult<IonType> {
+        if let Some(value) = self.encoded_value() {
+            // If the reader is on a value, the IonType is present.
+            let ion_type = value.header.ion_type;
+            return if value.header.is_null() {
+                Ok(ion_type)
+            } else {
+                illegal_operation(format!(
+                    "cannot read null; reader is currently positioned on a non-null {ion_type}"
+                ))
+            };
+        }
+        Err(illegal_operation_raw(
+            "the reader is not currently positioned on a value",
+        ))
+    }
+
+    fn read_bool(&self) -> IonResult<bool> {
+        let (encoded_value, _) = self.value_and_bytes(IonType::Bool)?;
+
+        let representation = encoded_value.header.length_code;
+        match representation {
+            0 => Ok(false),
+            1 => Ok(true),
+            invalid => decoding_error(format!(
+                "found a boolean value with an illegal representation (must be 0 or 1): {}",
+                invalid
+            )),
+        }
+    }
+
+    fn read_i64(&self) -> IonResult<i64> {
+        self.read_int().and_then(|i| {
+            i.as_i64()
+                .ok_or_else(|| decoding_error_raw("integer was too large to fit in an i64"))
+        })
+    }
+
+    fn read_int(&self) -> IonResult<Int> {
+        let (encoded_value, bytes) = self.value_and_bytes(IonType::Int)?;
+        let value: Int = if bytes.len() <= mem::size_of::<u64>() {
+            DecodedUInt::small_uint_from_slice(bytes).into()
+        } else {
+            DecodedUInt::big_uint_from_slice(bytes).into()
+        };
+
+        use self::IonTypeCode::*;
+        let value = match (encoded_value.header.ion_type_code, value) {
+            (PositiveInteger, integer) => integer,
+            (NegativeInteger, integer) if integer.is_zero() => {
+                return decoding_error("found a negative integer (typecode=3) with a value of 0");
+            }
+            (NegativeInteger, integer) => -integer,
+            _itc => return decoding_error("unexpected ion type code"),
+        };
+
+        Ok(value)
+    }
+
+    fn read_float(&self) -> IonResult<f64> {
+        let (encoded_value, bytes) = self.value_and_bytes(IonType::Float)?;
+        let number_of_bytes = encoded_value.value_length();
+        let value = match number_of_bytes {
+            0 => 0f64,
+            4 => f64::from(BigEndian::read_f32(bytes)),
+            8 => BigEndian::read_f64(bytes),
+            _ => return decoding_error("encountered a float with an illegal length"),
+        };
+        Ok(value)
+    }
+
+    fn read_decimal(&self) -> IonResult<Decimal> {
+        let (encoded_value, mut buffer) = self.value_and_buffer(IonType::Decimal)?;
+
+        if encoded_value.value_length() == 0 {
+            return Ok(Decimal::new(0i32, 0i64));
+        }
+
+        let exponent_var_int = buffer.read_var_int()?;
+        let coefficient_size_in_bytes =
+            encoded_value.value_length() - exponent_var_int.size_in_bytes();
+
+        let exponent = exponent_var_int.value();
+        let coefficient = buffer.read_int(coefficient_size_in_bytes)?;
+
+        if coefficient.is_negative_zero() {
+            return Ok(Decimal::negative_zero_with_exponent(exponent));
+        }
+
+        Ok(Decimal::new(coefficient, exponent))
+    }
+
+    fn read_string(&self) -> IonResult<Str> {
+        self.read_str().map(|s| s.into())
+    }
+
+    /// If the reader is currently positioned on a string, returns a [&str] containing its text.
+    fn read_str(&self) -> IonResult<&str> {
+        self.read_str_bytes().and_then(|bytes| {
+            std::str::from_utf8(bytes)
+                .map_err(|_| decoding_error_raw("encountered a string with invalid utf-8 data"))
+        })
+    }
+
+    fn read_symbol(&self) -> IonResult<RawSymbolTokenRef> {
+        self.read_symbol_id().map(RawSymbolTokenRef::SymbolId)
+    }
+
+    fn read_blob(&self) -> IonResult<Blob> {
+        self.read_blob_bytes().map(Vec::from).map(Blob::from)
+    }
+
+    /// If the reader is currently positioned on a blob, returns a slice containing its bytes.
+    fn read_blob_bytes(&self) -> IonResult<&[u8]> {
+        let (_encoded_value, bytes) = self.value_and_bytes(IonType::Blob)?;
+        Ok(bytes)
+    }
+
+    fn read_clob(&self) -> IonResult<Clob> {
+        self.read_clob_bytes().map(Vec::from).map(Clob::from)
+    }
+
+    /// If the reader is currently positioned on a clob, returns a slice containing its bytes.
+    fn read_clob_bytes(&self) -> IonResult<&[u8]> {
+        let (_encoded_value, bytes) = self.value_and_bytes(IonType::Clob)?;
+        Ok(bytes)
+    }
+
+    fn read_timestamp(&self) -> IonResult<Timestamp> {
+        let (encoded_value, mut buffer) = self.value_and_buffer(IonType::Timestamp)?;
+
+        let offset = buffer.read_var_int()?;
+        let is_known_offset = !offset.is_negative_zero();
+        let offset_minutes = offset.value() as i32;
+        let year = buffer.read_var_uint()?.value() as u32;
+
+        // Year precision
+
+        let builder = Timestamp::with_year(year);
+        if buffer.is_empty() {
+            let timestamp = builder.build()?;
+            return Ok(timestamp);
+        }
+
+        // Month precision
+
+        let month = buffer.read_var_uint()?.value() as u32;
+        let builder = builder.with_month(month);
+        if buffer.is_empty() {
+            let timestamp = builder.build()?;
+            return Ok(timestamp);
+        }
+
+        // Day precision
+
+        let day = buffer.read_var_uint()?.value() as u32;
+        let builder = builder.with_day(day);
+        if buffer.is_empty() {
+            let timestamp = builder.build()?;
+            return Ok(timestamp);
+        }
+
+        // Hour-and-minute precision
+
+        let hour = buffer.read_var_uint()?.value() as u32;
+        if buffer.is_empty() {
+            return decoding_error("timestamps with an hour must also specify a minute");
+        }
+        let minute = buffer.read_var_uint()?.value() as u32;
+        let builder = builder.with_hour_and_minute(hour, minute);
+        if buffer.is_empty() {
+            let timestamp = if is_known_offset {
+                builder.build_utc_fields_at_offset(offset_minutes)
+            } else {
+                builder.build_at_unknown_offset()
+            }?;
+            return Ok(timestamp);
+        }
+
+        // Second precision
+
+        let second = buffer.read_var_uint()?.value() as u32;
+        let builder = builder.with_second(second);
+        if buffer.is_empty() {
+            let timestamp = if is_known_offset {
+                builder.build_utc_fields_at_offset(offset_minutes)
+            } else {
+                builder.build_at_unknown_offset()
+            }?;
+            return Ok(timestamp);
+        }
+
+        // Fractional second precision
+
+        let subsecond_exponent = buffer.read_var_int()?.value();
+        // The remaining bytes represent the coefficient.
+        let coefficient_size_in_bytes = encoded_value.value_length() - buffer.total_consumed();
+        let subsecond_coefficient = if coefficient_size_in_bytes == 0 {
+            DecodedInt::zero()
+        } else {
+            buffer.read_int(coefficient_size_in_bytes)?
+        };
+
+        let builder = builder
+            .with_fractional_seconds(Decimal::new(subsecond_coefficient, subsecond_exponent));
+        let timestamp = if is_known_offset {
+            builder.build_utc_fields_at_offset(offset_minutes)
+        } else {
+            builder.build_at_unknown_offset()
+        }?;
+
+        Ok(timestamp)
     }
 
     /// Tries to downgrade the provided BigUint to a SymbolId (usize).
@@ -834,11 +1048,14 @@ impl<A: AsRef<[u8]>> RawIonReader for RawBinaryReader<A> {
             .unwrap_or(false)
     }
 
-    fn read_value(&mut self) -> IonResult<RawValueRef> {
+    fn read_value(&self) -> IonResult<RawValueRef> {
         let value = match self.encoded_value() {
             Some(value) => value,
             None => return illegal_operation("the reader is not currently positioned on a value"),
         };
+        if value.header.is_null() {
+            return Ok(RawValueRef::Null(value.header.ion_type));
+        }
         // TODO: Each helper method below contains its own validation and error handling.
         //       As an optimization, we can make 'unchecked' versions of these that allow us to
         //       share common logic, minimizing instructions.
@@ -857,219 +1074,6 @@ impl<A: AsRef<[u8]>> RawIonReader for RawBinaryReader<A> {
             IonType::SExp => Ok(RawValueRef::SExp),
             IonType::Struct => Ok(RawValueRef::Struct),
         }
-    }
-
-    fn read_null(&mut self) -> IonResult<IonType> {
-        if let Some(value) = self.encoded_value() {
-            // If the reader is on a value, the IonType is present.
-            let ion_type = value.header.ion_type;
-            return if value.header.is_null() {
-                Ok(ion_type)
-            } else {
-                illegal_operation(format!(
-                    "cannot read null; reader is currently positioned on a non-null {ion_type}"
-                ))
-            };
-        }
-        Err(illegal_operation_raw(
-            "the reader is not currently positioned on a value",
-        ))
-    }
-
-    fn read_bool(&mut self) -> IonResult<bool> {
-        let (encoded_value, _) = self.value_and_bytes(IonType::Bool)?;
-
-        let representation = encoded_value.header.length_code;
-        match representation {
-            0 => Ok(false),
-            1 => Ok(true),
-            _ => decoding_error(
-                "found a boolean value with an illegal representation (must be 0 or 1): {}",
-            ),
-        }
-    }
-
-    fn read_i64(&mut self) -> IonResult<i64> {
-        self.read_int().and_then(|i| {
-            i.as_i64()
-                .ok_or_else(|| decoding_error_raw("integer was too large to fit in an i64"))
-        })
-    }
-
-    fn read_int(&mut self) -> IonResult<Int> {
-        let (encoded_value, bytes) = self.value_and_bytes(IonType::Int)?;
-        let value: Int = if bytes.len() <= mem::size_of::<u64>() {
-            DecodedUInt::small_uint_from_slice(bytes).into()
-        } else {
-            DecodedUInt::big_uint_from_slice(bytes).into()
-        };
-
-        use self::IonTypeCode::*;
-        let value = match (encoded_value.header.ion_type_code, value) {
-            (PositiveInteger, integer) => integer,
-            (NegativeInteger, integer) if integer.is_zero() => {
-                return decoding_error("found a negative integer (typecode=3) with a value of 0");
-            }
-            (NegativeInteger, integer) => -integer,
-            _itc => return decoding_error("unexpected ion type code"),
-        };
-
-        Ok(value)
-    }
-
-    fn read_float(&mut self) -> IonResult<f64> {
-        let (encoded_value, bytes) = self.value_and_bytes(IonType::Float)?;
-        let number_of_bytes = encoded_value.value_length();
-        let value = match number_of_bytes {
-            0 => 0f64,
-            4 => f64::from(BigEndian::read_f32(bytes)),
-            8 => BigEndian::read_f64(bytes),
-            _ => return decoding_error("encountered a float with an illegal length"),
-        };
-        Ok(value)
-    }
-
-    fn read_decimal(&mut self) -> IonResult<Decimal> {
-        let (encoded_value, mut buffer) = self.value_and_buffer(IonType::Decimal)?;
-
-        if encoded_value.value_length() == 0 {
-            return Ok(Decimal::new(0i32, 0i64));
-        }
-
-        let exponent_var_int = buffer.read_var_int()?;
-        let coefficient_size_in_bytes =
-            encoded_value.value_length() - exponent_var_int.size_in_bytes();
-
-        let exponent = exponent_var_int.value();
-        let coefficient = buffer.read_int(coefficient_size_in_bytes)?;
-
-        if coefficient.is_negative_zero() {
-            return Ok(Decimal::negative_zero_with_exponent(exponent));
-        }
-
-        Ok(Decimal::new(coefficient, exponent))
-    }
-
-    fn read_string(&mut self) -> IonResult<Str> {
-        self.read_str().map(|s| s.into())
-    }
-
-    /// If the reader is currently positioned on a string, returns a [&str] containing its text.
-    fn read_str(&mut self) -> IonResult<&str> {
-        self.read_str_bytes().and_then(|bytes| {
-            std::str::from_utf8(bytes)
-                .map_err(|_| decoding_error_raw("encountered a string with invalid utf-8 data"))
-        })
-    }
-
-    fn read_symbol(&mut self) -> IonResult<RawSymbolTokenRef> {
-        self.read_symbol_id().map(RawSymbolTokenRef::SymbolId)
-    }
-
-    fn read_blob(&mut self) -> IonResult<Blob> {
-        self.read_blob_bytes().map(Vec::from).map(Blob::from)
-    }
-
-    /// If the reader is currently positioned on a blob, returns a slice containing its bytes.
-    fn read_blob_bytes(&mut self) -> IonResult<&[u8]> {
-        let (_encoded_value, bytes) = self.value_and_bytes(IonType::Blob)?;
-        Ok(bytes)
-    }
-
-    fn read_clob(&mut self) -> IonResult<Clob> {
-        self.read_clob_bytes().map(Vec::from).map(Clob::from)
-    }
-
-    /// If the reader is currently positioned on a clob, returns a slice containing its bytes.
-    fn read_clob_bytes(&mut self) -> IonResult<&[u8]> {
-        let (_encoded_value, bytes) = self.value_and_bytes(IonType::Clob)?;
-        Ok(bytes)
-    }
-
-    fn read_timestamp(&mut self) -> IonResult<Timestamp> {
-        let (encoded_value, mut buffer) = self.value_and_buffer(IonType::Timestamp)?;
-
-        let offset = buffer.read_var_int()?;
-        let is_known_offset = !offset.is_negative_zero();
-        let offset_minutes = offset.value() as i32;
-        let year = buffer.read_var_uint()?.value() as u32;
-
-        // Year precision
-
-        let builder = Timestamp::with_year(year);
-        if buffer.is_empty() {
-            let timestamp = builder.build()?;
-            return Ok(timestamp);
-        }
-
-        // Month precision
-
-        let month = buffer.read_var_uint()?.value() as u32;
-        let builder = builder.with_month(month);
-        if buffer.is_empty() {
-            let timestamp = builder.build()?;
-            return Ok(timestamp);
-        }
-
-        // Day precision
-
-        let day = buffer.read_var_uint()?.value() as u32;
-        let builder = builder.with_day(day);
-        if buffer.is_empty() {
-            let timestamp = builder.build()?;
-            return Ok(timestamp);
-        }
-
-        // Hour-and-minute precision
-
-        let hour = buffer.read_var_uint()?.value() as u32;
-        if buffer.is_empty() {
-            return decoding_error("timestamps with an hour must also specify a minute");
-        }
-        let minute = buffer.read_var_uint()?.value() as u32;
-        let builder = builder.with_hour_and_minute(hour, minute);
-        if buffer.is_empty() {
-            let timestamp = if is_known_offset {
-                builder.build_utc_fields_at_offset(offset_minutes)
-            } else {
-                builder.build_at_unknown_offset()
-            }?;
-            return Ok(timestamp);
-        }
-
-        // Second precision
-
-        let second = buffer.read_var_uint()?.value() as u32;
-        let builder = builder.with_second(second);
-        if buffer.is_empty() {
-            let timestamp = if is_known_offset {
-                builder.build_utc_fields_at_offset(offset_minutes)
-            } else {
-                builder.build_at_unknown_offset()
-            }?;
-            return Ok(timestamp);
-        }
-
-        // Fractional second precision
-
-        let subsecond_exponent = buffer.read_var_int()?.value();
-        // The remaining bytes represent the coefficient.
-        let coefficient_size_in_bytes = encoded_value.value_length() - buffer.total_consumed();
-        let subsecond_coefficient = if coefficient_size_in_bytes == 0 {
-            DecodedInt::zero()
-        } else {
-            buffer.read_int(coefficient_size_in_bytes)?
-        };
-
-        let builder = builder
-            .with_fractional_seconds(Decimal::new(subsecond_coefficient, subsecond_exponent));
-        let timestamp = if is_known_offset {
-            builder.build_utc_fields_at_offset(offset_minutes)
-        } else {
-            builder.build_at_unknown_offset()
-        }?;
-
-        Ok(timestamp)
     }
 
     fn step_in(&mut self) -> IonResult<()> {

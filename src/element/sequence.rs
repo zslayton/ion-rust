@@ -2,10 +2,20 @@ use crate::element::builders::SequenceBuilder;
 use crate::element::iterators::ElementsIterator;
 use crate::element::Element;
 use crate::ion_eq::IonEq;
+use std::fmt::{Display, Formatter};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Sequence {
     elements: Vec<Element>,
+}
+
+impl Display for Sequence {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        for element in &self.elements {
+            writeln!(f, "{}", element)?;
+        }
+        Ok(())
+    }
 }
 
 impl Sequence {

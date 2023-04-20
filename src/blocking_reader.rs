@@ -3,13 +3,11 @@ use std::ops::Range;
 
 use crate::binary::non_blocking::raw_binary_reader::RawBinaryReader;
 use crate::data_source::ToIonDataSource;
-use crate::element::{Blob, Clob};
 use crate::raw_reader::BufferedRawReader;
 use crate::result::IonResult;
 use crate::text::non_blocking::raw_text_reader::RawTextReader;
-use crate::types::timestamp::Timestamp;
 use crate::types::value_ref::RawValueRef;
-use crate::{Decimal, Int, IonError, IonType, RawIonReader, RawStreamItem, RawSymbolTokenRef, Str};
+use crate::{IonError, IonType, RawIonReader, RawStreamItem, RawSymbolTokenRef};
 
 pub type BlockingRawTextReader<T> = BlockingRawReader<RawTextReader<Vec<u8>>, T>;
 pub type BlockingRawBinaryReader<T> = BlockingRawReader<RawBinaryReader<Vec<u8>>, T>;
@@ -110,21 +108,7 @@ impl<R: BufferedRawReader, T: ToIonDataSource> RawIonReader for BlockingRawReade
             fn number_of_annotations(&self) -> usize;
             fn field_name(&self) -> IonResult<RawSymbolTokenRef>;
             fn is_null(&self) -> bool;
-            fn read_value(&mut self) -> IonResult<RawValueRef>;
-            fn read_null(&mut self) -> IonResult<IonType>;
-            fn read_bool(&mut self) -> IonResult<bool>;
-            fn read_i64(&mut self) -> IonResult<i64>;
-            fn read_int(&mut self) -> IonResult<Int>;
-            fn read_float(&mut self) -> IonResult<f64>;
-            fn read_decimal(&mut self) -> IonResult<Decimal>;
-            fn read_string(&mut self) -> IonResult<Str>;
-            fn read_str(&mut self) -> IonResult<&str>;
-            fn read_symbol(&mut self) -> IonResult<RawSymbolTokenRef>;
-            fn read_blob(&mut self) -> IonResult<Blob>;
-            fn read_blob_bytes(&mut self) -> IonResult<&[u8]>;
-            fn read_clob(&mut self) -> IonResult<Clob>;
-            fn read_clob_bytes(&mut self) -> IonResult<&[u8]>;
-            fn read_timestamp(&mut self) -> IonResult<Timestamp>;
+            fn read_value(&self) -> IonResult<RawValueRef>;
             fn step_in(&mut self) -> IonResult<()>;
             fn parent_type(&self) -> Option<IonType>;
             fn depth(&self) -> usize;
@@ -167,6 +151,7 @@ mod tests {
     use crate::raw_reader::RawStreamItem;
     use crate::result::IonResult;
     use crate::text::non_blocking::raw_text_reader::RawTextReader;
+    use crate::ReadRawValueRef;
 
     fn bin_reader(source: &[u8]) -> BlockingRawBinaryReader<Vec<u8>> {
         let reader = BlockingRawReader::<NBRawBinaryReader<Vec<u8>>, Vec<u8>>::new(source.to_vec());
@@ -279,7 +264,7 @@ mod tests {
                     reader.step_in()?;
 
                     next_type(reader, IonType::Int, false);
-                    assert_eq!(reader.read_i64()?, 1);
+                    assert_eq!(reader.read_int()?, 1);
                     let result = reader.step_out();
                     match result {
                         Err(IonError::Incomplete { .. }) => (),
@@ -313,13 +298,13 @@ mod tests {
 
                     reader.step_in()?;
                     next_type(reader, IonType::Int, false);
-                    assert_eq!(reader.read_i64()?, 1);
+                    assert_eq!(reader.read_int()?, 1);
                     next_type(reader, IonType::List, false);
                     reader.step_in()?;
                     next_type(reader, IonType::Int, false);
-                    assert_eq!(reader.read_i64()?, 2);
+                    assert_eq!(reader.read_int()?, 2);
                     // next_type(reader, IonType::Integer, false);
-                    // assert_eq!(reader.read_i64()?, 3);
+                    // assert_eq!(reader.read_int()?, 3);
                     reader.step_out()?; // Step out of foo[1]
                     reader.step_out()?; // Step out of foo
 
@@ -328,7 +313,7 @@ mod tests {
 
                     reader.step_in()?;
                     next_type(reader, IonType::Int, false);
-                    assert_eq!(reader.read_i64()?, 5);
+                    assert_eq!(reader.read_int()?, 5);
                     next_type(reader, IonType::SExp, false);
                     reader.step_in()?;
                     next_type(reader, IonType::Bool, false);
@@ -343,7 +328,7 @@ mod tests {
                     reader.step_out()?; // Step out of our top-levelstruct
 
                     next_type(reader, IonType::Int, false);
-                    assert_eq!(reader.read_i64()?, 11);
+                    assert_eq!(reader.read_int()?, 11);
                     Ok(())
                 }
 

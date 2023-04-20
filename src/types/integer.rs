@@ -345,6 +345,36 @@ impl PartialEq for Int {
     }
 }
 
+impl PartialEq<i64> for Int {
+    fn eq(&self, other: &i64) -> bool {
+        match self {
+            Int::I64(this) => *this == *other,
+            // If this bigint is too large to be converted to an i64, they're not equal
+            Int::BigInt(this) => i64::try_from(this) == Ok(*other),
+        }
+    }
+}
+
+impl PartialEq<i32> for Int {
+    fn eq(&self, other: &i32) -> bool {
+        match self {
+            Int::I64(this) => i32::try_from(*this) == Ok(*other),
+            // If this bigint is too large to be converted to an i64, they're not equal
+            Int::BigInt(this) => i32::try_from(this) == Ok(*other),
+        }
+    }
+}
+
+impl PartialEq<usize> for Int {
+    fn eq(&self, other: &usize) -> bool {
+        match self {
+            Int::I64(this) => usize::try_from(*this) == Ok(*other),
+            // If this bigint is too large to be converted to an i64, they're not equal
+            Int::BigInt(this) => usize::try_from(this) == Ok(*other),
+        }
+    }
+}
+
 impl Eq for Int {}
 
 impl Neg for Int {

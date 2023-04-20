@@ -3,21 +3,16 @@ use std::io;
 use std::ops::Range;
 
 use crate::constants::v1_0::{system_symbol_ids, SYSTEM_SYMBOLS};
-use crate::element::{Blob, Clob};
 use crate::raw_reader::{RawIonReader, RawStreamItem};
-use crate::raw_symbol_token::RawSymbolToken;
 use crate::raw_symbol_token_ref::AsRawSymbolTokenRef;
 use crate::result::{decoding_error, decoding_error_raw, illegal_operation, IonError, IonResult};
-use crate::symbol::Symbol;
 use crate::symbol_ref::AsSymbolRef;
 use crate::system_reader::LstPosition::*;
-use crate::types::decimal::Decimal;
-use crate::types::integer::Int;
-use crate::types::string::Str;
-use crate::types::timestamp::Timestamp;
 use crate::types::value_ref::ValueRef;
 use crate::value_reader::{SequenceRef, StructRef};
-use crate::{BlockingRawBinaryReader, IonType, RawSymbolTokenRef, SymbolRef, SymbolTable};
+use crate::{
+    BlockingRawBinaryReader, IonType, RawSymbolTokenRef, ReadRawValueRef, SymbolRef, SymbolTable,
+};
 
 /// Tracks where the [SystemReader] is in the process of reading a local symbol table.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -104,14 +99,6 @@ struct LstData {
     // LST. If we have, finding a second one must result in an error.
     found_symbols_field: bool,
     found_imports_field: bool,
-    // TODO: The raw readers can now read a value more than once. Remove this.
-    // At present, BlockingRawTextReader and BlockingRawBinaryReader cannot read the same value more than once.
-    // When the SystemReader needs to read the current value as part of processing a local symbol
-    // table, it must store a copy of that value in case the user requests it via `read_string()`,
-    // `read_i64()`, etc. The fields below are used to store such copies.
-    current_symbol: RawSymbolToken,
-    current_string: String,
-    current_int: i64,
 }
 
 impl LstData {
@@ -122,9 +109,6 @@ impl LstData {
             state: NotReadingAnLst,
             found_symbols_field: false,
             found_imports_field: false,
-            current_symbol: RawSymbolToken::SymbolId(0),
-            current_string: String::new(),
-            current_int: 0,
         }
     }
 }
@@ -284,10 +268,8 @@ impl<R: RawIonReader> SystemReader<R> {
                 // We're in the `symbols` list.
                 if let (IonType::String, false) = (ion_type, is_null) {
                     // If the current value is a non-null string, add its text to the symbol table.
-                    self.load_current_string()?;
-                    // We clone the current string because the user may ask for its value via
-                    // read_string().
-                    self.lst.symbols.push(Some(self.lst.current_string.clone()))
+                    let symbol_text = self.raw_reader.read_string()?;
+                    self.lst.symbols.push(Some(symbol_text.to_string()))
                 } else {
                     // Non-string values and nulls are treated as symbols with unknown text.
                     self.lst.symbols.push(None);
@@ -316,13 +298,8 @@ impl<R: RawIonReader> SystemReader<R> {
             IonType::Symbol => {
                 // If the `imports` field value is the symbol '$ion_symbol_table', then this is an
                 // LST append.
-                self.load_current_symbol()?;
-                if self
-                    .lst
-                    .current_symbol
-                    .as_raw_symbol_token_ref()
-                    .matches(system_symbol_ids::ION_SYMBOL_TABLE, "$ion_symbol_table")
-                {
+                let symbol = self.raw_reader.read_symbol()?;
+                if symbol.matches(system_symbol_ids::ION_SYMBOL_TABLE, "$ion_symbol_table") {
                     self.lst.is_append = true;
                 }
             }
@@ -337,39 +314,6 @@ impl<R: RawIonReader> SystemReader<R> {
                 // Non-list, non-symbol values for the `imports` field are ignored.
             }
         };
-        Ok(())
-    }
-
-    // Reads the raw reader's current value expecting a symbol. Stores the value in
-    // `self.lst.current_symbol` so it can be returned if the user requests it.
-    fn load_current_symbol(&mut self) -> IonResult<()> {
-        let token = self.raw_reader.read_symbol()?;
-        self.lst.current_symbol = token.to_owned();
-        Ok(())
-    }
-
-    // Reads the raw reader's current value expecting a string. Stores the value in
-    // `self.lst.current_string` so it can be returned if the user requests it.
-    fn load_current_string(&mut self) -> IonResult<()> {
-        self.lst.current_string.clear();
-        let SystemReader {
-            ref mut raw_reader,
-            ref mut lst,
-            ..
-        } = *self;
-        lst.current_string.push_str(raw_reader.read_str()?);
-
-        Ok(())
-    }
-
-    // Reads the raw reader's current value expecting an integer. Stores the value in
-    // `self.lst.current_int` so it can be returned if the user requests it.
-    fn load_current_int(&mut self) -> IonResult<()> {
-        // Note: This method will only be called on integers found inside of local symbol tables.
-        //       If an LST has an integer that's too big to fit in an i64, this will fail.
-        self.raw_reader
-            .read_i64()
-            .expect("load_current_int() called at a value that was not an integer.");
         Ok(())
     }
 
@@ -481,23 +425,6 @@ impl<R: RawIonReader> SystemReader<R> {
 
     pub fn symbol_table(&self) -> &SymbolTable {
         &self.symbol_table
-    }
-
-    pub fn read_raw_symbol(&mut self) -> IonResult<RawSymbolTokenRef> {
-        if self.lst.state == AtLstImports
-            && self.raw_reader.ion_type() == Some(IonType::Symbol)
-            && !self.raw_reader.is_null()
-        {
-            // The raw reader is at the `imports` field of an LST and its value is a symbol.
-            // This means that it has eagerly loaded the symbol to see if it is $ion_symbol_table.
-            // Return a copy of the materialized symbol value.
-            return Ok(self.lst.current_symbol.as_raw_symbol_token_ref());
-        }
-        // Otherwise, delegate to the raw reader
-        if self.raw_reader.current() == RawStreamItem::Nothing {
-            return illegal_operation("called `read_raw_symbol`, but reader is not over a value");
-        }
-        self.raw_reader.read_symbol()
     }
 
     pub fn raw_field_name_token(&mut self) -> IonResult<RawSymbolTokenRef> {
@@ -659,48 +586,6 @@ impl<R: RawIonReader> SystemReader<R> {
         iter
     }
 
-    pub fn read_symbol(&mut self) -> IonResult<Symbol> {
-        let sid = match self.read_raw_symbol()? {
-            RawSymbolTokenRef::Text(text) => return Ok(Symbol::owned(text)),
-            RawSymbolTokenRef::SymbolId(sid) => sid,
-        };
-        if let Some(symbol) = self.symbol_table.symbol_for(sid) {
-            // Make a cheap clone of the Arc<str> in the symbol table
-            Ok(symbol.clone())
-        } else if !self.symbol_table.sid_is_valid(sid) {
-            decoding_error(format!("Symbol ID ${sid} is out of range."))
-        } else {
-            decoding_error(format!("Symbol ID ${sid} has unknown text."))
-        }
-    }
-
-    pub fn read_string(&mut self) -> IonResult<Str> {
-        if self.current_string_was_consumed() {
-            return Ok(self.lst.current_string.clone().into());
-        }
-        // Otherwise, delegate to the raw reader
-        if self.raw_reader.current() == RawStreamItem::Nothing {
-            return illegal_operation(
-                "called `read_string` when reader was not positioned on a value",
-            );
-        }
-        self.raw_reader.read_string()
-    }
-
-    pub fn read_str(&mut self) -> IonResult<&str> {
-        if self.current_string_was_consumed() {
-            return Ok(&self.lst.current_string);
-        }
-
-        if self.raw_reader.current() == RawStreamItem::Nothing {
-            return illegal_operation(
-                "called `read_str` when reader was not positioned on a value",
-            );
-        }
-
-        self.raw_reader.read_str()
-    }
-
     // The SystemReader needs to expose many of the same functions as the RawReader, but only some of
     // those need to be re-defined to allow for system value processing. Any method listed here will
     // be delegated to self.raw_reader directly.
@@ -709,46 +594,83 @@ impl<R: RawIonReader> SystemReader<R> {
             pub fn is_null(&self) -> bool;
             pub fn ion_version(&self) -> (u8, u8);
             pub fn ion_type(&self) -> Option<IonType>;
-            pub fn read_null(&mut self) -> IonResult<IonType>;
-            pub fn read_bool(&mut self) -> IonResult<bool>;
-            pub fn read_int(&mut self) -> IonResult<Int>;
-            pub fn read_i64(&mut self) -> IonResult<i64>;
-            pub fn read_float(&mut self) -> IonResult<f64>;
-            pub fn read_decimal(&mut self) -> IonResult<Decimal>;
-            pub fn read_blob(&mut self) -> IonResult<Blob>;
-            pub fn read_blob_bytes(&mut self) -> IonResult<&[u8]>;
-            pub fn read_clob(&mut self) -> IonResult<Clob>;
-            pub fn read_clob_bytes(&mut self) -> IonResult<&[u8]>;
-            pub fn read_timestamp(&mut self) -> IonResult<Timestamp>;
             pub fn depth(&self) -> usize;
             pub fn parent_type(&self) -> Option<IonType>;
         }
     }
 
     pub fn read_value(&mut self) -> IonResult<ValueRef<R>> {
-        match self.current_item {
-            SystemStreamItem::SymbolTableNull(ion_type) | SystemStreamItem::Null(ion_type) => {
-                Ok(ValueRef::Null(ion_type))
-            }
-            SystemStreamItem::SymbolTableValue(ion_type) | SystemStreamItem::Value(ion_type) => {
-                match ion_type {
-                    IonType::Null => unreachable!("null is handled in an earlier match arm"),
-                    IonType::Bool => self.read_bool().map(ValueRef::Bool),
-                    IonType::Int => self.read_int().map(ValueRef::Int),
-                    IonType::Float => self.read_float().map(ValueRef::Float),
-                    IonType::Decimal => self.read_decimal().map(ValueRef::Decimal),
-                    IonType::Timestamp => self.read_timestamp().map(ValueRef::Timestamp),
-                    IonType::Symbol => self.read_symbol().map(ValueRef::Symbol),
-                    IonType::String => self.read_str().map(ValueRef::String),
-                    IonType::Clob => self.read_clob_bytes().map(ValueRef::Clob),
-                    IonType::Blob => self.read_blob_bytes().map(ValueRef::Blob),
-                    IonType::List => Ok(ValueRef::List(SequenceRef::new(self))),
-                    IonType::SExp => Ok(ValueRef::SExp(SequenceRef::new(self))),
-                    IonType::Struct => Ok(ValueRef::Struct(StructRef::new(self))),
-                }
-            }
-            _ => illegal_operation("reader is not currently positioned on a value"),
+        use crate::types::value_ref::RawValueRef::*;
+
+        let ion_type = match self.ion_type() {
+            None => return illegal_operation("system reader is not on a value"),
+            Some(ion_type) => ion_type,
+        };
+
+        if self.is_null() {
+            return Ok(ValueRef::Null(ion_type));
         }
+
+        'container: {
+            let value_ref = match ion_type {
+                IonType::List => ValueRef::List(SequenceRef::new(self)),
+                IonType::SExp => ValueRef::SExp(SequenceRef::new(self)),
+                IonType::Struct => ValueRef::Struct(StructRef::new(self)),
+                _ => break 'container,
+            };
+            return Ok(value_ref);
+        }
+
+        let system_reader: &SystemReader<R> = self;
+        let value_ref = match system_reader.raw_reader.read_value()? {
+            // Scalar type mappings are straightforward with the exception of `Symbol`, which needs
+            // to perform resolution before returning.
+            Null(ion_type) => ValueRef::Null(ion_type),
+            Bool(b) => ValueRef::Bool(b),
+            Int(i) => ValueRef::Int(i),
+            Float(f) => ValueRef::Float(f),
+            Decimal(d) => ValueRef::Decimal(d),
+            Timestamp(t) => ValueRef::Timestamp(t),
+            Symbol(s) => ValueRef::Symbol(s.resolve(system_reader.symbol_table())?.to_owned()),
+            String(s) => ValueRef::String(s),
+            Clob(c) => ValueRef::Clob(c),
+            Blob(b) => ValueRef::Blob(b),
+            _ => unreachable!("all cases covered"),
+        };
+        Ok(value_ref)
+    }
+
+    fn read_scalar_value(&self) -> IonResult<Option<ValueRef<R>>> {
+        use crate::types::value_ref::RawValueRef::*;
+
+        let value_ref = match self.raw_reader.read_value()? {
+            // Scalar type mappings are straightforward with the exception of `Symbol`, which needs
+            // to perform resolution before returning.
+            Null(ion_type) => ValueRef::Null(ion_type),
+            Bool(b) => ValueRef::Bool(b),
+            Int(i) => ValueRef::Int(i),
+            Float(f) => ValueRef::Float(f),
+            Decimal(d) => ValueRef::Decimal(d),
+            Timestamp(t) => ValueRef::Timestamp(t),
+            Symbol(s) => ValueRef::Symbol(s.resolve(self.symbol_table())?.to_owned()),
+            String(s) => ValueRef::String(s),
+            Clob(c) => ValueRef::Clob(c),
+            Blob(b) => ValueRef::Blob(b),
+            _ => return Ok(None),
+        };
+        Ok(Some(value_ref))
+    }
+
+    fn read_container_value(&mut self) -> IonResult<Option<ValueRef<R>>> {
+        use crate::types::value_ref::RawValueRef::*;
+
+        let value_ref = match self.raw_reader.read_value()? {
+            List => ValueRef::List(SequenceRef::new(self)),
+            SExp => ValueRef::SExp(SequenceRef::new(self)),
+            Struct => ValueRef::Struct(StructRef::new(self)),
+            _ => return Ok(None),
+        };
+        Ok(Some(value_ref))
     }
 }
 
@@ -786,6 +708,7 @@ impl<T: AsRef<[u8]>> SystemReader<BlockingRawBinaryReader<io::Cursor<T>>> {
 mod tests {
     use super::SystemStreamItem::*;
     use crate::blocking_reader::*;
+    use crate::ReadValueRef;
 
     use super::*;
 

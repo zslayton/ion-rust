@@ -1,8 +1,6 @@
-use crate::element::{Blob, Clob};
-use crate::types::string::Str;
 use crate::types::value_ref::RawValueRef;
 use crate::types::IonType;
-use crate::{Decimal, Int, IonResult, RawSymbolTokenRef, Timestamp};
+use crate::{IonResult, RawSymbolTokenRef};
 use std::fmt::{Display, Formatter};
 use std::io::Read;
 
@@ -56,64 +54,7 @@ pub trait RawIonReader {
     /// Returns `true` if the reader is currently positioned over an Ion null of any type.
     fn is_null(&self) -> bool;
 
-    fn read_value(&mut self) -> IonResult<RawValueRef>;
-
-    /// Attempts to read the current item as an Ion null and return its Ion type. If the current
-    /// item is not a null or an IO error is encountered while reading, returns [IonError].
-    fn read_null(&mut self) -> IonResult<IonType>;
-
-    /// Attempts to read the current item as an Ion boolean and return it as a bool. If the current
-    /// item is not a boolean or an IO error is encountered while reading, returns [IonError].
-    fn read_bool(&mut self) -> IonResult<bool>;
-
-    /// Attempts to read the current item as an Ion integer and return it as an i64. If the current
-    /// item is not an integer, the integer is too large to be represented as an `i64`, or an IO
-    /// error is encountered while reading, returns [IonError].
-    fn read_i64(&mut self) -> IonResult<i64>;
-
-    /// Attempts to read the current item as an Ion integer and return it as an [Int]. If the
-    /// current item is not an integer or an IO error is encountered while reading, returns
-    /// [IonError].
-    fn read_int(&mut self) -> IonResult<Int>;
-
-    /// Attempts to read the current item as an Ion float and return it as an f64. If the current
-    /// item is not a float or an IO error is encountered while reading, returns [IonError].
-    fn read_float(&mut self) -> IonResult<f64>;
-
-    /// Attempts to read the current item as an Ion decimal and return it as a [Decimal]. If the current
-    /// item is not a decimal or an IO error is encountered while reading, returns [IonError].
-    fn read_decimal(&mut self) -> IonResult<Decimal>;
-
-    /// Attempts to read the current item as an Ion string and return it as a [String]. If the current
-    /// item is not a string or an IO error is encountered while reading, returns [IonError].
-    fn read_string(&mut self) -> IonResult<Str>;
-
-    /// Attempts to read the current item as an Ion string and return it as a [&str]. If the
-    /// current item is not a string or an IO error is encountered while reading, returns
-    /// [IonError].
-    fn read_str(&mut self) -> IonResult<&str>;
-
-    /// Attempts to read the current item as an Ion symbol and return it as a [Self::Symbol]. If the
-    /// current item is not a symbol or an IO error is encountered while reading, returns [IonError].
-    fn read_symbol(&mut self) -> IonResult<RawSymbolTokenRef>;
-
-    /// Attempts to read the current item as an Ion blob and return it as a `Vec<u8>`. If the
-    /// current item is not a blob or an IO error is encountered while reading, returns [IonError].
-    fn read_blob(&mut self) -> IonResult<Blob>;
-
-    /// If the reader is currently positioned on a blob, returns a slice containing its bytes.
-    fn read_blob_bytes(&mut self) -> IonResult<&[u8]>;
-
-    /// Attempts to read the current item as an Ion clob and return it as a `Vec<u8>`. If the
-    /// current item is not a clob or an IO error is encountered while reading, returns [IonError].
-    fn read_clob(&mut self) -> IonResult<Clob>;
-
-    /// If the reader is currently positioned on a clob, returns a slice containing its bytes.
-    fn read_clob_bytes(&mut self) -> IonResult<&[u8]>;
-
-    /// Attempts to read the current item as an Ion timestamp and return [Timestamp]. If the current
-    /// item is not a timestamp or an IO error is encountered while reading, returns [IonError].
-    fn read_timestamp(&mut self) -> IonResult<Timestamp>;
+    fn read_value(&self) -> IonResult<RawValueRef>;
 
     /// If the current value is a container (i.e. a struct, list, or s-expression), positions the
     /// cursor at the beginning of that container's sequence of child values. The application must
@@ -222,64 +163,8 @@ impl<R: RawIonReader + ?Sized> RawIonReader for Box<R> {
         (**self).is_null()
     }
 
-    fn read_value(&mut self) -> IonResult<RawValueRef> {
+    fn read_value(&self) -> IonResult<RawValueRef> {
         (**self).read_value()
-    }
-
-    fn read_null(&mut self) -> IonResult<IonType> {
-        (**self).read_null()
-    }
-
-    fn read_bool(&mut self) -> IonResult<bool> {
-        (**self).read_bool()
-    }
-
-    fn read_i64(&mut self) -> IonResult<i64> {
-        (**self).read_i64()
-    }
-
-    fn read_int(&mut self) -> IonResult<Int> {
-        (**self).read_int()
-    }
-
-    fn read_float(&mut self) -> IonResult<f64> {
-        (**self).read_float()
-    }
-
-    fn read_decimal(&mut self) -> IonResult<Decimal> {
-        (**self).read_decimal()
-    }
-
-    fn read_string(&mut self) -> IonResult<Str> {
-        (**self).read_string()
-    }
-
-    fn read_str(&mut self) -> IonResult<&str> {
-        (**self).read_str()
-    }
-
-    fn read_symbol(&mut self) -> IonResult<RawSymbolTokenRef> {
-        (**self).read_symbol()
-    }
-
-    fn read_blob(&mut self) -> IonResult<Blob> {
-        (**self).read_blob()
-    }
-
-    fn read_blob_bytes(&mut self) -> IonResult<&[u8]> {
-        (**self).read_blob_bytes()
-    }
-
-    fn read_clob(&mut self) -> IonResult<Clob> {
-        (**self).read_clob()
-    }
-
-    fn read_clob_bytes(&mut self) -> IonResult<&[u8]> {
-        (**self).read_clob_bytes()
-    }
-
-    fn read_timestamp(&mut self) -> IonResult<Timestamp> {
-        (**self).read_timestamp()
     }
 
     fn step_in(&mut self) -> IonResult<()> {
@@ -329,64 +214,8 @@ impl<'a, R: RawIonReader + ?Sized> RawIonReader for &'a mut R {
         (**self).is_null()
     }
 
-    fn read_value(&mut self) -> IonResult<RawValueRef> {
+    fn read_value(&self) -> IonResult<RawValueRef> {
         (**self).read_value()
-    }
-
-    fn read_null(&mut self) -> IonResult<IonType> {
-        (**self).read_null()
-    }
-
-    fn read_bool(&mut self) -> IonResult<bool> {
-        (**self).read_bool()
-    }
-
-    fn read_i64(&mut self) -> IonResult<i64> {
-        (**self).read_i64()
-    }
-
-    fn read_int(&mut self) -> IonResult<Int> {
-        (**self).read_int()
-    }
-
-    fn read_float(&mut self) -> IonResult<f64> {
-        (**self).read_float()
-    }
-
-    fn read_decimal(&mut self) -> IonResult<Decimal> {
-        (**self).read_decimal()
-    }
-
-    fn read_string(&mut self) -> IonResult<Str> {
-        (**self).read_string()
-    }
-
-    fn read_str(&mut self) -> IonResult<&str> {
-        (**self).read_str()
-    }
-
-    fn read_symbol(&mut self) -> IonResult<RawSymbolTokenRef> {
-        (**self).read_symbol()
-    }
-
-    fn read_blob(&mut self) -> IonResult<Blob> {
-        (**self).read_blob()
-    }
-
-    fn read_blob_bytes(&mut self) -> IonResult<&[u8]> {
-        (**self).read_blob_bytes()
-    }
-
-    fn read_clob(&mut self) -> IonResult<Clob> {
-        (**self).read_clob()
-    }
-
-    fn read_clob_bytes(&mut self) -> IonResult<&[u8]> {
-        (**self).read_clob_bytes()
-    }
-
-    fn read_timestamp(&mut self) -> IonResult<Timestamp> {
-        (**self).read_timestamp()
     }
 
     fn step_in(&mut self) -> IonResult<()> {

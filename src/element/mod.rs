@@ -38,6 +38,7 @@ pub use self::bytes::Bytes;
 pub use annotations::Annotations;
 pub use lob::{Blob, Clob};
 
+pub use element_stream_reader::ElementStreamReader;
 pub use list::List;
 pub use r#struct::Struct;
 pub use sequence::Sequence;
