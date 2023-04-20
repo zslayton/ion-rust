@@ -10,12 +10,18 @@ use std::process::exit;
 fn main() -> IonResult<()> {
     let args: Vec<String> = std::env::args().collect();
     let mode = args.get(1).unwrap_or_else(|| {
-        eprintln!("USAGE:\n\n    {} [Binary Ion file]\n", args.get(0).unwrap());
+        eprintln!(
+            "USAGE:\n\n    {} [blocking|nonblocking] [Binary Ion file]\n",
+            args.get(0).unwrap()
+        );
         eprintln!("No mode was specified.");
         exit(1);
     });
     let path = args.get(2).unwrap_or_else(|| {
-        eprintln!("USAGE:\n\n    {} [Binary Ion file]\n", args.get(0).unwrap());
+        eprintln!(
+            "USAGE:\n\n    {} [blocking|nonblocking] [Binary Ion file]\n",
+            args.get(0).unwrap()
+        );
         eprintln!("No input file was specified.");
         exit(2);
     });

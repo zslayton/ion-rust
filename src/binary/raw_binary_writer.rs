@@ -917,7 +917,6 @@ mod writer_tests {
 
     type TestWriter<'a> = RawBinaryWriter<&'a mut Vec<u8>>;
     type TestReader<'a> = RawBinaryReader<&'a [u8]>;
-    type ExpectedValueRef<'a> = ValueRef<'a, Box<dyn RawIonReader + 'a>>;
 
     /// A reusable test outline for verifying RawBinaryWriter behavior.
     fn binary_writer_test(

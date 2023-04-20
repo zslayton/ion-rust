@@ -86,98 +86,6 @@ impl<R: BufferedRawReader, T: ToIonDataSource> RawIonReader for BlockingRawReade
         }
     }
 
-    fn current(&self) -> RawStreamItem {
-        self.reader.current()
-    }
-
-    fn ion_type(&self) -> Option<IonType> {
-        self.reader.ion_type()
-    }
-
-    fn annotations<'a>(&'a self) -> Box<dyn Iterator<Item = IonResult<RawSymbolTokenRef>> + 'a> {
-        self.reader.annotations()
-    }
-
-    fn has_annotations(&self) -> bool {
-        self.reader.has_annotations()
-    }
-
-    fn number_of_annotations(&self) -> usize {
-        self.reader.number_of_annotations()
-    }
-
-    fn field_name(&self) -> IonResult<RawSymbolTokenRef> {
-        self.reader.field_name()
-    }
-
-    fn is_null(&self) -> bool {
-        self.reader.is_null()
-    }
-
-    fn read_value(&mut self) -> IonResult<RawValueRef> {
-        self.reader.read_value()
-    }
-
-    fn read_null(&mut self) -> IonResult<IonType> {
-        self.reader.read_null()
-    }
-
-    fn read_bool(&mut self) -> IonResult<bool> {
-        self.reader.read_bool()
-    }
-
-    fn read_i64(&mut self) -> IonResult<i64> {
-        self.reader.read_i64()
-    }
-
-    fn read_int(&mut self) -> IonResult<Int> {
-        self.reader.read_int()
-    }
-
-    fn read_float(&mut self) -> IonResult<f64> {
-        self.reader.read_float()
-    }
-
-    fn read_decimal(&mut self) -> IonResult<Decimal> {
-        self.reader.read_decimal()
-    }
-
-    fn read_string(&mut self) -> IonResult<Str> {
-        self.reader.read_string()
-    }
-
-    fn read_str(&mut self) -> IonResult<&str> {
-        self.reader.read_str()
-    }
-
-    fn read_symbol(&mut self) -> IonResult<RawSymbolTokenRef> {
-        self.reader.read_symbol()
-    }
-
-    fn read_blob(&mut self) -> IonResult<Blob> {
-        self.reader.read_blob()
-    }
-
-    fn read_blob_bytes(&mut self) -> IonResult<&[u8]> {
-        self.reader.read_blob_bytes()
-    }
-
-    fn read_clob(&mut self) -> IonResult<Clob> {
-        self.reader.read_clob()
-    }
-
-    fn read_clob_bytes(&mut self) -> IonResult<&[u8]> {
-        self.reader.read_clob_bytes()
-    }
-
-    fn read_timestamp(&mut self) -> IonResult<Timestamp> {
-        self.reader.read_timestamp()
-    }
-
-    fn step_in(&mut self) -> IonResult<()> {
-        self.reader.step_in()
-    }
-
     fn step_out(&mut self) -> IonResult<()> {
         let mut read_size = self.expected_read_size;
         loop {
@@ -193,15 +101,35 @@ impl<R: BufferedRawReader, T: ToIonDataSource> RawIonReader for BlockingRawReade
         }
     }
 
-    fn parent_type(&self) -> Option<IonType> {
-        self.reader.parent_type()
+    delegate! {
+        to self.reader {
+            fn current(&self) -> RawStreamItem;
+            fn ion_type(&self) -> Option<IonType>;
+            fn annotations<'a>(&'a self) -> Box<dyn Iterator<Item = IonResult<RawSymbolTokenRef>> + 'a>;
+            fn has_annotations(&self) -> bool;
+            fn number_of_annotations(&self) -> usize;
+            fn field_name(&self) -> IonResult<RawSymbolTokenRef>;
+            fn is_null(&self) -> bool;
+            fn read_value(&mut self) -> IonResult<RawValueRef>;
+            fn read_null(&mut self) -> IonResult<IonType>;
+            fn read_bool(&mut self) -> IonResult<bool>;
+            fn read_i64(&mut self) -> IonResult<i64>;
+            fn read_int(&mut self) -> IonResult<Int>;
+            fn read_float(&mut self) -> IonResult<f64>;
+            fn read_decimal(&mut self) -> IonResult<Decimal>;
+            fn read_string(&mut self) -> IonResult<Str>;
+            fn read_str(&mut self) -> IonResult<&str>;
+            fn read_symbol(&mut self) -> IonResult<RawSymbolTokenRef>;
+            fn read_blob(&mut self) -> IonResult<Blob>;
+            fn read_blob_bytes(&mut self) -> IonResult<&[u8]>;
+            fn read_clob(&mut self) -> IonResult<Clob>;
+            fn read_clob_bytes(&mut self) -> IonResult<&[u8]>;
+            fn read_timestamp(&mut self) -> IonResult<Timestamp>;
+            fn step_in(&mut self) -> IonResult<()>;
+            fn parent_type(&self) -> Option<IonType>;
+            fn depth(&self) -> usize;
+        }
     }
-
-    fn depth(&self) -> usize {
-        self.reader.depth()
-    }
-
-    // TODO: Replace most of the above impls with delegate!
 }
 
 impl<T: ToIonDataSource> BlockingRawReader<RawBinaryReader<Vec<u8>>, T> {
