@@ -105,6 +105,12 @@ impl<'a> SymbolRef<'a> {
     }
 }
 
+impl<'a, T: AsSymbolRef> PartialEq<T> for SymbolRef<'a> {
+    fn eq(&self, other: &T) -> bool {
+        *self == other.as_symbol_ref()
+    }
+}
+
 /// Allows a `SymbolRef` to be constructed from a source value. This enables non-symbol types to be
 /// viewed as a symbol with little to no runtime overhead.
 pub trait AsSymbolRef {
