@@ -1,8 +1,9 @@
 use ion_rs::binary::non_blocking::raw_binary_reader::RawBinaryReader;
 use ion_rs::raw_reader::RawStreamItem;
 use ion_rs::result::IonResult;
-use ion_rs::{BlockingRawBinaryReader, IonType};
-use ion_rs::{RawIonReader, ReadRawValueRef};
+use ion_rs::types::value_ref::RawValueRef;
+use ion_rs::BlockingRawBinaryReader;
+use ion_rs::RawIonReader;
 use memmap::MmapOptions;
 use std::fs::File;
 use std::process::exit;
@@ -53,54 +54,27 @@ fn main() -> IonResult<()> {
 // Visits each value in the stream recursively, reading each scalar into a native Rust type.
 // Prints the total number of values read upon completion.
 fn read_all_values<R: RawIonReader>(reader: &mut R) -> IonResult<usize> {
-    use IonType::*;
     use RawStreamItem::{Nothing, Null as NullValue, Value, VersionMarker};
     let mut count: usize = 0;
     loop {
         match reader.next()? {
             VersionMarker(_major, _minor) => {}
-            NullValue(_ion_type) => {
+            NullValue(_) | Value(_) => {
                 count += 1;
-                continue;
-            }
-            Value(ion_type) => {
-                count += 1;
-                match ion_type {
-                    Struct | List | SExp => reader.step_in()?,
-                    String => {
-                        let _string = reader.read_string()?;
+                match reader.read_value()? {
+                    RawValueRef::SExp | RawValueRef::List | RawValueRef::Struct => {
+                        reader.step_in()?;
                     }
-                    Symbol => {
-                        let _symbol_id = reader.read_symbol()?;
-                    }
-                    Int => {
-                        let _int = reader.read_int()?;
-                    }
-                    Float => {
-                        let _float = reader.read_float()?;
-                    }
-                    Decimal => {
-                        let _decimal = reader.read_decimal()?;
-                    }
-                    Timestamp => {
-                        let _timestamp = reader.read_timestamp()?;
-                    }
-                    Bool => {
-                        let _boolean = reader.read_bool()?;
-                    }
-                    Blob => {
-                        let _blob = reader.read_blob()?;
-                    }
-                    Clob => {
-                        let _clob = reader.read_clob()?;
-                    }
-                    Null => {}
+                    _ => {}
                 }
+                continue;
             }
             Nothing if reader.depth() > 0 => {
                 reader.step_out()?;
             }
-            _ => break,
+            Nothing => {
+                break;
+            }
         }
     }
     Ok(count)
