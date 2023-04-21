@@ -157,7 +157,6 @@ impl<'a, R: RawIonReader + 'a> ElementLoader<'a, R> {
         while let Some(mut value) = seq_reader.next_element()? {
             child_elements.push(Self::materialize_value(&mut value)?);
         }
-        seq_reader.close()?;
         Ok(child_elements.into())
     }
 
@@ -173,7 +172,6 @@ impl<'a, R: RawIonReader + 'a> ElementLoader<'a, R> {
                 Self::materialize_value(&mut field.value())?,
             ))
         }
-        struct_reader.close()?;
         Ok(Struct::from_iter(child_elements.into_iter()))
     }
 }

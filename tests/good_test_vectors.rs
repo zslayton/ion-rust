@@ -161,7 +161,7 @@ fn read_sequence<R: RawIonReader>(sequence_ref: SequenceRef<R>) -> IonResult<()>
     while let Some(mut value) = sequence_reader.next_element()? {
         read_value(&mut value)?;
     }
-    sequence_reader.close()
+    Ok(())
 }
 
 fn read_struct<R: RawIonReader>(struct_ref: StructRef<R>) -> IonResult<()> {
@@ -170,5 +170,5 @@ fn read_struct<R: RawIonReader>(struct_ref: StructRef<R>) -> IonResult<()> {
         field.read_name()?;
         read_value(&mut field.value())?;
     }
-    struct_reader.close()
+    Ok(())
 }

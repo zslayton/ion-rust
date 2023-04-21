@@ -153,6 +153,7 @@ impl<R: RawIonReader> IonReader for UserReader<R> {
     #[allow(clippy::should_implement_trait)]
     fn next(&mut self) -> IonResult<Self::Item<'_>> {
         use crate::SystemStreamItem::*;
+        self.system_reader.step_out_to_depth(0)?;
         loop {
             match self.system_reader.next()? {
                 VersionMarker(_, _) | SymbolTableValue(_) | SymbolTableNull(_) => {

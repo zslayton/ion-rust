@@ -90,8 +90,6 @@ impl<'r, R: RawIonReader> Debug for SequenceRef<'r, R> {
 ///   // ...and read it as an integer, adding it to the running sum.
 ///   sum += child_value.read_i64()?;
 /// }
-/// // Close the list reader, causing the cursor to move beyond the list.
-/// list_reader.close()?;
 ///
 /// assert_eq!(sum, 6);
 ///# Ok(())
@@ -169,12 +167,16 @@ impl<'r, R: RawIonReader> Debug for SequenceRef<'r, R> {
 ///# }
 /// ```
 pub struct ValueReader<'r, R: RawIonReader> {
+    depth: usize,
     reader: &'r mut SystemReader<R>,
 }
 
 impl<'r, R: RawIonReader> ValueReader<'r, R> {
     pub(crate) fn new(reader: &'r mut SystemReader<R>) -> ValueReader<R> {
-        ValueReader { reader }
+        ValueReader {
+            depth: reader.depth(),
+            reader,
+        }
     }
 
     /// Returns the [IonType] of the current value.
@@ -204,27 +206,29 @@ impl<'r, R: RawIonReader> Debug for ValueReader<'r, R> {
 }
 
 pub struct SequenceReader<'r, R: RawIonReader> {
+    depth: usize,
     reader: &'r mut SystemReader<R>,
 }
 
 impl<'r, R: RawIonReader> SequenceReader<'r, R> {
     pub(crate) fn new(reader: &'r mut SystemReader<R>) -> SequenceReader<R> {
-        Self { reader }
+        Self {
+            depth: reader.depth(),
+            reader,
+        }
     }
 
     pub fn next_element(&mut self) -> IonResult<Option<ValueReader<R>>> {
+        self.reader.step_out_to_depth(self.depth)?;
         reader_for_next_value(self.reader)
     }
 
-    pub fn read_next_element(&mut self) -> IonResult<Option<ValueRef<R>>> {
+    pub fn read_next_element(&'r mut self) -> IonResult<Option<ValueRef<R>>> {
+        self.reader.step_out_to_depth(self.depth)?;
         if advance_to_next_user_value(self.reader)?.is_none() {
             return Ok(None);
         }
         Ok(Some(self.reader.read_value()?))
-    }
-
-    pub fn close(self) -> IonResult<()> {
-        self.reader.step_out()
     }
 }
 
@@ -246,29 +250,29 @@ impl<'r, R: RawIonReader> SequenceReader<'r, R> {
 ///     sum += field.value().read_i64()?;
 ///   }
 /// }
-/// struct_reader.close()?; // Step out of the struct
 ///
 ///# Ok(())
 ///# }
 /// ```
 pub struct StructReader<'r, R: RawIonReader> {
+    depth: usize,
     reader: &'r mut SystemReader<R>,
 }
 
 impl<'r, R: RawIonReader> StructReader<'r, R> {
     pub(crate) fn new(reader: &'r mut SystemReader<R>) -> StructReader<R> {
-        Self { reader }
+        Self {
+            depth: reader.depth(),
+            reader,
+        }
     }
 
     pub fn next_field(&mut self) -> IonResult<Option<FieldReader<R>>> {
+        self.reader.step_out_to_depth(self.depth)?;
         if advance_to_next_user_value(self.reader)?.is_none() {
             return Ok(None);
         }
         return Ok(Some(FieldReader::new(self.reader)));
-    }
-
-    pub fn close(self) -> IonResult<()> {
-        self.reader.step_out()
     }
 }
 
@@ -302,7 +306,7 @@ fn reader_for_current_value<R: RawIonReader>(reader: &mut SystemReader<R>) -> Va
         reader.current(),
         SystemStreamItem::Value(_) | SystemStreamItem::Null(_)
     ));
-    ValueReader { reader }
+    ValueReader::new(reader)
 }
 
 // Skips through any/all system values until the next user value (if any) is found.
@@ -329,7 +333,7 @@ fn reader_for_next_value<R: RawIonReader>(
         match reader.next()? {
             Nothing => return Ok(None),
             VersionMarker(_, _) | SymbolTableValue(_) | SymbolTableNull(_) => {}
-            Null(_) | Value(_) => return Ok(Some(ValueReader { reader })),
+            Null(_) | Value(_) => return Ok(Some(ValueReader::new(reader))),
         }
     }
 }

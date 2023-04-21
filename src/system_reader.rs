@@ -551,6 +551,13 @@ impl<R: RawIonReader> SystemReader<R> {
         Ok(())
     }
 
+    pub fn step_out_to_depth(&mut self, target_depth: usize) -> IonResult<()> {
+        while self.depth() > target_depth {
+            self.step_out()?
+        }
+        Ok(())
+    }
+
     pub fn field_name(&self) -> IonResult<SymbolRef> {
         match self.raw_reader.field_name() {
             Ok(RawSymbolTokenRef::SymbolId(sid)) => self
