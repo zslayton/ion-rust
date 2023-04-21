@@ -221,7 +221,6 @@ pub use writer::IonWriter;
 pub use binary::raw_binary_writer::RawBinaryWriter;
 pub use blocking_reader::{BlockingRawBinaryReader, BlockingRawReader, BlockingRawTextReader};
 pub use raw_reader::{RawIonReader, RawStreamItem};
-pub use reader::StreamItem;
 pub use reader::{Reader, ReaderBuilder, UserReader};
 pub use stream_reader::IonReader;
 pub use system_reader::{SystemReader, SystemStreamItem};

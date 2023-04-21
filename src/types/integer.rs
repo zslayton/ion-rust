@@ -333,6 +333,18 @@ impl IntAccess for Int {
     }
 }
 
+impl TryFrom<&Int> for i64 {
+    type Error = IonError;
+
+    fn try_from(value: &Int) -> Result<Self, Self::Error> {
+        match value {
+            Int::I64(int) => Ok(*int),
+            Int::BigInt(big_int) => i64::try_from(big_int)
+                .or_else(|_| decoding_error("Int value was too large to be converted to i64")),
+        }
+    }
+}
+
 impl PartialEq for Int {
     fn eq(&self, other: &Self) -> bool {
         use Int::*;

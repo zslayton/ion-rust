@@ -12,7 +12,6 @@ use crate::stream_reader::IonReader;
 use crate::symbol_table::SymbolTable;
 use crate::value_reader::ValueReader;
 use crate::{BlockingRawBinaryReader, BlockingRawTextReader, SystemReader};
-use std::fmt::{Display, Formatter};
 
 /// Configures and constructs new instances of [Reader].
 pub struct ReaderBuilder {}
@@ -130,29 +129,6 @@ pub mod integration_testing {
     }
 }
 
-/// Stream components that an application-level [Reader] implementation may encounter.
-#[derive(Debug)]
-pub enum StreamItem<'r, R: RawIonReader> {
-    /// An Ion value and a handle by which to read it
-    Value(ValueReader<'r, R>),
-    /// Indicates that the reader is not positioned over anything. This can happen:
-    /// * before the reader has begun processing the stream.
-    /// * after the reader has stepped into a container, but before the reader has called next()
-    /// * after the reader has stepped out of a container, but before the reader has called next()
-    /// * after the reader has read the last item in a container
-    Nothing,
-}
-
-impl<'a, R: RawIonReader> Display for StreamItem<'a, R> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        use StreamItem::*;
-        match self {
-            Value(value_reader) => write!(f, "{}", value_reader.ion_type()),
-            Nothing => Ok(()),
-        }
-    }
-}
-
 impl<R: RawIonReader> UserReader<R> {
     pub fn symbol_table(&self) -> &SymbolTable {
         self.system_reader.symbol_table()
@@ -165,7 +141,7 @@ impl<R: RawIonReader> UserReader<R> {
 }
 
 impl<R: RawIonReader> IonReader for UserReader<R> {
-    type Item<'a> = StreamItem<'a, R> where R: 'a;
+    type Item<'a> = Option<ValueReader<'a, R>> where R: 'a;
 
     fn ion_version(&self) -> (u8, u8) {
         self.system_reader.ion_version()
@@ -184,8 +160,8 @@ impl<R: RawIonReader> IonReader for UserReader<R> {
                     // part of a serialized symbol table. The user reader can ignore this
                     // and move on to the next stream item.
                 }
-                Value(_) | Null(_) => return Ok(StreamItem::Value(self.value_reader())),
-                Nothing => return Ok(StreamItem::Nothing),
+                Value(_) | Null(_) => return Ok(Some(self.value_reader())),
+                Nothing => return Ok(None),
             }
         }
     }
@@ -228,10 +204,9 @@ mod tests {
 
     use super::*;
     use crate::binary::constants::v1_0::IVM;
-    use crate::{BlockingRawBinaryReader, SymbolRef, ValueRef};
+    use crate::{BlockingRawBinaryReader, ReadValueRef};
 
     use crate::result::IonResult;
-    use crate::StreamItem::Value;
 
     type TestDataSource = io::Cursor<Vec<u8>>;
 
@@ -292,41 +267,20 @@ mod tests {
     fn test_read_struct() -> IonResult<()> {
         let mut reader = ion_reader_for(EXAMPLE_STREAM);
 
-        if let Value(mut v) = reader.next()? {
-            if let ValueRef::Struct(s) = v.read()? {
-                let mut struct_reader = s.reader()?;
+        let mut first_element = reader.next()?.unwrap();
+        let mut struct_reader = first_element.as_struct()?.reader()?;
 
-                let mut field1 = struct_reader
-                    .next_field()?
-                    .expect("expected int field 'foo'");
-                assert_eq!(field1.read_name()?, SymbolRef::with_text("foo"));
-                assert!(matches!(
-                    field1.read_value()?,
-                    ValueRef::Int(crate::Int::I64(1))
-                ));
+        let mut field1 = struct_reader.next_field()?.unwrap();
+        assert_eq!(field1.read_name()?, "foo");
+        assert_eq!(field1.value().read_i64()?, 1);
 
-                let mut field2 = struct_reader
-                    .next_field()?
-                    .expect("expected int field 'bar'");
-                assert_eq!(field2.read_name()?, SymbolRef::with_text("bar"));
-                assert!(matches!(
-                    field2.read_value()?,
-                    ValueRef::Int(crate::Int::I64(2))
-                ));
+        let mut field2 = struct_reader.next_field()?.unwrap();
+        assert_eq!(field2.read_name()?, "bar");
+        assert_eq!(field2.value().read_i64()?, 2);
 
-                let mut field3 = struct_reader
-                    .next_field()?
-                    .expect("expected int field 'baz'");
-                assert_eq!(field3.read_name()?, SymbolRef::with_text("baz"));
-                assert!(matches!(
-                    field3.read_value()?,
-                    ValueRef::Int(crate::Int::I64(3))
-                ));
-            }
-        } else {
-            panic!("expected a struct");
-        }
-
+        let mut field3 = struct_reader.next_field()?.unwrap();
+        assert_eq!(field3.read_name()?, "baz");
+        assert_eq!(field3.value().read_i64()?, 3);
         Ok(())
     }
 }

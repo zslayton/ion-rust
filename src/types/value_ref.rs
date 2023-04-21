@@ -6,8 +6,11 @@ use crate::{
     Timestamp, ValueReader,
 };
 
-/// As RawValueRef represents a reference to a value in data stream, the container variants
-/// simply indicate their Ion type. To access their nested data, the reader would need to step in.
+/// As RawValueRef represents a reference to an unresolved value read from the data stream.
+/// If the value is a symbol, it only contains the information found in the data stream (a symbol ID
+/// or text literal). If it is a symbol ID, a symbol table will be needed to find its associated text.
+///
+/// For a resolved version of this type, see [ValueRef].
 #[derive(Debug, PartialEq)]
 pub enum RawValueRef<'a> {
     Null(IonType),
@@ -20,8 +23,6 @@ pub enum RawValueRef<'a> {
     Symbol(RawSymbolTokenRef<'a>),
     Blob(&'a [u8]),
     Clob(&'a [u8]),
-    // As ValueRef represents a reference to a value in the streaming APIs, the container variants
-    // simply indicate their Ion type. To access their nested data, the reader would need to step in.
     SExp,
     List,
     Struct,
@@ -195,87 +196,13 @@ impl<R: RawIonReader> ReadRawValueRef for R {
     }
 }
 
-/// A reference to a value in the input stream. Where possible, text and lob values will be a
-/// zero-copy slice of input data.
+/// A [ValueRef] represents a value that has been read from the input stream. Scalar variants contain
+/// their associated data, while container variants contain a handle to traverse the container. (See
+/// [SequenceRef] and [StructRef].)
 ///
-/// Scalar values can be directly accessed by matching on their corresponding variants.
-///
-/// ```
-/// use ion_rs::{IonReader, IonResult, ReaderBuilder, ValueRef, ReadValueRef, ReadRawValueRef, StreamItem};
-///# fn main() -> IonResult<()> {
-///
-/// use ion_rs::{};
-/// use ion_rs::types::integer::IntAccess;
-///
-/// let mut reader = ReaderBuilder::default().build("1 2 3")?;
-/// let mut sum = 0;
-///
-/// while let StreamItem::Value(mut v) = reader.next()? {
-///     if let ValueRef::Int(i) = v.read()? {
-///         sum += i.as_i64().unwrap();
-///     }
-/// }
-/// assert_eq!(sum, 6);
-///
-/// // Again, but using a typed 'read_int()' method to early return on a type mismatch
-/// let mut reader = ReaderBuilder::default().build("1 2 3")?;
-///
-/// sum = 0;
-/// while let StreamItem::Value(mut v) = reader.next()? {
-///     sum += v.read_int()?.as_i64().unwrap();
-/// }
-///# Ok(())
-///# }
-/// ```
-///
-/// Container variants return a handle to the container value, which you can use to traverse the
-/// contents of the container.
-///
-/// **Traversing a list**
-/// ```
-/// use ion_rs::{IonReader, IonResult, ReaderBuilder, ValueRef, ReadValueRef, ReadRawValueRef, StreamItem};
-///# fn main() -> IonResult<()> {
-///
-/// use ion_rs::{};
-/// use ion_rs::types::integer::IntAccess;
-///
-/// let mut reader = ReaderBuilder::default().build("[1, 2, 3]")?;
-///
-/// if let StreamItem::Value(mut value) = reader.next()? {
-///   let mut list_reader = value.as_list()?.reader()?;
-///   let mut sum = 0;
-///   while let Some(mut child_value) = list_reader.next_element()? {
-///     sum += child_value.read_i64()?;
-///   }
-///   assert_eq!(sum, 6);
-/// }
-///# Ok(())
-///# }
-/// ```
-///
-/// **Traversing a struct**
-/// ```
-/// use ion_rs::{IonReader, IonResult, ReaderBuilder, ValueRef, ReadValueRef, ReadRawValueRef, StreamItem};
-///# fn main() -> IonResult<()> {
-///
-/// use ion_rs::{};
-/// use ion_rs::types::integer::IntAccess;
-///
-/// let mut reader = ReaderBuilder::default().build("{a: 1, b: 2, c:3}")?;
-///
-/// if let StreamItem::Value(mut value) = reader.next()? {
-///   let mut struct_reader = value.as_struct()?.reader()?;
-///   let mut sum = 0;
-///   while let Some(mut field) = struct_reader.next_field()? {
-///     if field.read_name()? != "b" {
-///       sum += field.value().read_i64()?;
-///     }
-///   }
-///   assert_eq!(sum, 4);
-/// }
-///# Ok(())
-///# }
-/// ```
+/// Unlike a [crate::element::Value], a `ValueRef` avoids heap allocation whenever possible.
+/// Numeric values and timestamps are stored within the `ValueRef` itself. Text values and lobs hold
+/// references to either a slice of input data or text in the symbol table.
 #[derive(Debug)]
 pub enum ValueRef<'a, R: RawIonReader + 'a> {
     Null(IonType),
@@ -419,12 +346,8 @@ pub trait ReadValueRef<'a, R: RawIonReader + 'a> {
     }
 
     fn read_i64(&'a mut self) -> IonResult<i64> {
-        match self.read_value()?.expect_int()? {
-            Int::I64(i) => Ok(i),
-            Int::BigInt(i) => {
-                i64::try_from(i).map_err(|_| decoding_error_raw("expected an i64, found a bigint"))
-            }
-        }
+        let int = self.read_value()?.expect_int()?;
+        i64::try_from(&int).map_err(|_| decoding_error_raw("expected an i64, found a bigint"))
     }
 
     fn read_float(&'a mut self) -> IonResult<f64> {

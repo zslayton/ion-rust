@@ -9,7 +9,6 @@ use std::str::FromStr;
 use walkdir::WalkDir;
 
 use ion_rs::result::{decoding_error, IonResult};
-use ion_rs::StreamItem::Value;
 use ion_rs::{
     IonReader, RawIonReader, Reader, ReaderBuilder, SequenceRef, StructRef, ValueReader, ValueRef,
 };
@@ -128,7 +127,7 @@ fn read_file(path: &Path) -> IonResult<()> {
 
 // Recursively reads all of the values in the provided Reader, surfacing any errors.
 fn read_all_values(reader: &mut Reader) -> IonResult<()> {
-    while let Value(mut value) = reader.next()? {
+    while let Some(mut value) = reader.next()? {
         read_value(&mut value)?;
     }
     Ok(())

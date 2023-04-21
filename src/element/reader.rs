@@ -6,7 +6,7 @@
 use crate::element::{Annotations, Element, Sequence, Struct, Value};
 use crate::result::{decoding_error, IonResult};
 use crate::value_reader::{SequenceRef, StructRef, ValueReader};
-use crate::{IonReader, RawIonReader, StreamItem, UserReader, ValueRef};
+use crate::{IonReader, RawIonReader, UserReader, ValueRef};
 
 /// Reads Ion data into [`Element`] instances.
 ///
@@ -110,11 +110,10 @@ impl<'a, R: RawIonReader + 'a> ElementLoader<'a, R> {
     /// to materialize it.
     pub(crate) fn materialize_next(&mut self) -> IonResult<Option<Element>> {
         // Advance the reader to the next value
-        let mut value_reader = match self.reader.next()? {
-            StreamItem::Value(v) => v,
-            StreamItem::Nothing => return Ok(None),
-        };
-        Ok(Some(Self::materialize_value(&mut value_reader)?))
+        self.reader
+            .next()?
+            .map(|mut value_reader| Self::materialize_value(&mut value_reader))
+            .transpose()
     }
 
     /// Recursively materialize the reader's current Ion value and returns it as `Ok(Some(value))`.
