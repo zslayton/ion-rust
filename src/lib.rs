@@ -195,6 +195,8 @@ mod symbol_table;
 mod system_reader;
 mod writer;
 
+#[cfg(feature = "experimental-ion_1_1")]
+pub mod ion_1_1;
 #[cfg(feature = "experimental-streaming")]
 pub(crate) mod thunk;
 

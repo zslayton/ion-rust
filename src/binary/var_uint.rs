@@ -10,7 +10,10 @@ use std::mem;
 
 const BITS_PER_ENCODED_BYTE: usize = 7;
 const STORAGE_SIZE_IN_BITS: usize = mem::size_of::<usize>() * 8;
-const MAX_ENCODED_SIZE_IN_BYTES: usize = STORAGE_SIZE_IN_BITS / BITS_PER_ENCODED_BYTE;
+// The following is ceiling division without requiring a conversion to f64.
+// The expression is equivalent to: ceil(STORAGE_SIZE_IN_BITS / BITS_PER_ENCODED_BYTE)
+const MAX_ENCODED_SIZE_IN_BYTES: usize =
+    (STORAGE_SIZE_IN_BITS + BITS_PER_ENCODED_BYTE - 1) / BITS_PER_ENCODED_BYTE;
 
 const LOWER_7_BITMASK: u8 = 0b0111_1111;
 const HIGHEST_BIT_VALUE: u8 = 0b1000_0000;
@@ -35,8 +38,12 @@ impl VarUInt {
     /// Reads a VarUInt from the provided data source.
     pub fn read<R: IonDataSource>(data_source: &mut R) -> IonResult<VarUInt> {
         let mut magnitude: usize = 0;
+        let mut is_first_byte = true;
+        let mut overflow_risk = false;
 
         let mut byte_processor = |byte: u8| {
+            overflow_risk |= is_first_byte && byte > 1u8;
+            is_first_byte = false;
             let lower_seven = (LOWER_7_BITMASK & byte) as usize;
             magnitude <<= 7; // Shifts 0 to 0 in the first iteration
             magnitude |= lower_seven;
@@ -48,15 +55,18 @@ impl VarUInt {
         // Prevent overflow by checking that the VarUInt was not too large to safely fit in the
         // data type being used to house the decoded value.
         //
-        // This approach has two drawbacks:
-        // * When using a u64, we only allow up to 63 bits of encoded magnitude data.
-        // * It will return an error for inefficiently-encoded small values that use more bytes
-        //   than required. (e.g. A 10-byte encoding of the number 0 will be rejected.)
+        // This will return an error for inefficiently-encoded small values that use more bytes
+        // than required. (e.g. A 10-byte encoding of the number 0 will be rejected.)
         //
         // However, reading VarUInt values is a very hot code path for reading binary Ion. This
         // compromise allows us to prevent overflows for the cost of a single branch per VarUInt
         // rather than performing extra bookkeeping logic on a per-byte basis.
-        if encoded_size_in_bytes > MAX_ENCODED_SIZE_IN_BYTES {
+        //
+        // If the encoded value was more than 10 bytes long...
+        if encoded_size_in_bytes > MAX_ENCODED_SIZE_IN_BYTES
+            // or it was exactly 10 bytes, but the first byte contained more than a single bit.
+            || encoded_size_in_bytes == MAX_ENCODED_SIZE_IN_BYTES && overflow_risk
+        {
             return decoding_error(format!(
                 "Found a {encoded_size_in_bytes}-byte VarUInt. Max supported size is {MAX_ENCODED_SIZE_IN_BYTES} bytes."
             ));
@@ -72,15 +82,15 @@ impl VarUInt {
     /// sink, returning the number of bytes written.
     pub fn write_u64<W: Write>(sink: &mut W, mut magnitude: u64) -> IonResult<usize> {
         // A u64 is 8 bytes of data. The VarUInt encoding will add a continuation bit to every byte,
-        // growing the data size by 8 more bits. Therefore, the largest encoded size of a u64 is
-        // 9 bytes.
-        const VAR_UINT_BUFFER_SIZE: usize = 9;
+        // plus one more termination bit. Therefore, the largest encoded size of a u64 is
+        // 10 bytes; the last byte only uses one bit.
+        const VAR_UINT_BUFFER_SIZE: usize = 10;
 
         // Create a buffer to store the encoded value.
         #[rustfmt::skip]
         let mut buffer: [u8; VAR_UINT_BUFFER_SIZE] = [
-            0, 0, 0, 0, 0, 0, 0, 0, 0b1000_0000
-            //                        ^-- Set the 'end' flag of the final byte to 1
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0b1000_0000
+            //                           ^-- Set the 'end' flag of the final byte to 1
         ];
 
         if magnitude == 0 {
@@ -175,6 +185,23 @@ mod tests {
             0b0111_1111,
             0b0111_1111,
             0b0111_1111,
+            0b1111_1111, // 1 byte more than the maximum allowed on 64-bit systems
+        ]))
+        .expect_err("This should have failed due to overflow.");
+    }
+
+    #[test]
+    fn test_read_var_uint_slight_overflow_detection() {
+        let _var_uint = VarUInt::read(&mut Cursor::new(&[
+            0b0000_0011, // One bit more than the maximum allowed on 64-bit systems
+            0b0111_1111,
+            0b0111_1111,
+            0b0111_1111,
+            0b0111_1111,
+            0b0111_1111,
+            0b0111_1111,
+            0b0111_1111,
+            0b0111_1111,
             0b1111_1111,
         ]))
         .expect_err("This should have failed due to overflow.");
@@ -213,6 +240,17 @@ mod tests {
     fn test_write_var_uint_three_byte_values() -> IonResult<()> {
         var_uint_encoding_test(81_991, &[0b0000_0101, 0b0000_0000, 0b1100_0111])?;
         var_uint_encoding_test(400_600, &[0b0001_1000, 0b0011_1001, 0b1101_1000])?;
+        Ok(())
+    }
+
+    #[test]
+    fn roundtrip_u64_max() -> IonResult<()> {
+        let mut buffer = Vec::new();
+        let encoded_size = VarUInt::write_u64(&mut buffer, u64::MAX)?;
+        assert_eq!(encoded_size, 10);
+        println!("{:X?}", buffer);
+        let value = VarUInt::read(&mut buffer.as_slice())?;
+        assert_eq!(value.value() as u64, u64::MAX);
         Ok(())
     }
 }
