@@ -1,12 +1,85 @@
 use crate::result::decoding_error;
 use crate::IonResult;
-use byteorder::{LittleEndian, ReadBytesExt};
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::io::Write;
 
 const BITS_PER_U64: u32 = 64;
 const BITS_PER_ENCODED_BYTE: u32 = 7;
 
+// 0 to 64 inclusive, 65 values
+const fn init_bytes_needed_cache() -> [u8; 65] {
+    let mut cache = [0u8; 65];
+    let mut leading_zeros = 0usize;
+    while leading_zeros < 64 {
+        let magnitude_bits_needed = 64 - leading_zeros;
+        cache[leading_zeros] = ((magnitude_bits_needed as u32 + BITS_PER_ENCODED_BYTE - 1)
+            / BITS_PER_ENCODED_BYTE) as u8;
+        leading_zeros += 1;
+    }
+    // Special case; 64 leading zeros means the value is zero. We need a byte to represent it anyway.
+    cache[64] = 1;
+    cache
+}
+
+static BYTES_NEEDED_CACHE: [u8; 65] = init_bytes_needed_cache();
+
 pub fn encode_var_uint<W: Write>(output: &mut W, value: u64) -> IonResult<usize> {
+    if value < 0x80 {
+        output.write_all(&[(value * 2) as u8 + 1])?;
+        return Ok(1);
+    } else if value < 0x4000 {
+        output.write_all(&((value * 4) as u16 + 2u16).to_le_bytes())?;
+        return Ok(2);
+    }
+    let leading_zeros = value.leading_zeros();
+    // The following is ceiling division without requiring a conversion to f64.
+    // The expression is equivalent to: ceil(magnitude_bits_needed / BITS_PER_ENCODED_BYTE)
+    let num_encoded_bytes = BYTES_NEEDED_CACHE[leading_zeros as usize] as usize;
+
+    match num_encoded_bytes {
+        0..=8 => {
+            // When encoded, the continuation flags and the value all fit in 8 bytes. We can encode
+            // everything in a u64 and then write it to output.
+            //
+            // There's one continuation flag bit for each encoded byte. To set the bits:
+            // * Left shift a `1` by the number of bytes minus one.
+            //
+            // For example, if `num_encoded_bytes` is 5, then:
+            //   1 << 4   =>   1 0000
+            //      End flag --^ ^^^^-- Four more bytes follow
+            let flag_bits = 1u64 << (num_encoded_bytes - 1);
+            // Left shift the value to accommodate the trailing flag bits and then OR them together
+            let encoded_value = (value << num_encoded_bytes) | flag_bits;
+            output.write_all(&encoded_value.to_le_bytes()[..num_encoded_bytes as usize])?;
+            Ok(num_encoded_bytes)
+        }
+        9 => {
+            // When combined with the continuation flags, the value is too large to be encoded in
+            // a u64. It will be nine bytes in all.
+            // We need to leave a `1` in the low bit of the next byte to be the End flag. Because
+            // we need fewer than 64 bits for magnitude, we can encode the remainder of the data
+            // in a u64.
+            let encoded_value = (value << 1) + 1; // Leave a trailing `1` in the lowest bit
+            output.write_all(&[0x00])?;
+            output.write_all(&encoded_value.to_le_bytes()[..])?;
+            Ok(9)
+        }
+        10 => {
+            // The first is always 0xFF, indicating that at least 8 more bytes follow.
+            // The second has two more continuation flag bits (`10`); the value is 10 bytes long.
+            // We can fit 6 bits of magnitude in this second byte.
+            let second_byte = ((value & 0b111111) << 2) as u8 | 0b10u8;
+            output.write_all(&[0x00, second_byte])?;
+            // The remaining 58 bits of magnitude can be encoded in a u64.
+            let remaining_magnitude = value >> 6;
+            output.write_all(&remaining_magnitude.to_le_bytes()[..])?;
+            Ok(10)
+        }
+        _ => unreachable!("a u64 value cannot have more than 64 magnitude bits"),
+    }
+}
+
+pub fn orig_encode_var_uint<W: Write>(output: &mut W, value: u64) -> IonResult<usize> {
     if value < 0x80 {
         output.write_all(&[(value * 2) as u8 + 1])?;
         return Ok(1);
@@ -24,6 +97,7 @@ pub fn encode_var_uint<W: Write>(output: &mut W, value: u64) -> IonResult<usize>
         (magnitude_bits_needed + BITS_PER_ENCODED_BYTE - 1) / BITS_PER_ENCODED_BYTE;
 
     match magnitude_bits_needed {
+        // Note: this branch relies on the short circuit 'if/else' above to handle 0
         0..=56 => {
             // When encoded, the continuation flags and the value all fit in 8 bytes. We can encode
             // everything in a u64 and then write it to output.
