@@ -1,5 +1,3 @@
-pub mod alt;
-
 use crate::result::decoding_error;
 use crate::IonResult;
 use byteorder::{LittleEndian, ReadBytesExt};
@@ -10,10 +8,10 @@ const BITS_PER_ENCODED_BYTE: u32 = 7;
 
 pub fn encode_var_uint<W: Write>(output: &mut W, value: u64) -> IonResult<usize> {
     if value < 0x80 {
-        output.write_all(&[(value * 2) as u8])?;
+        output.write_all(&[(value * 2) as u8 + 1])?;
         return Ok(1);
     } else if value < 0x4000 {
-        output.write_all(&((value * 4) as u16 + 1u16).to_le_bytes())?;
+        output.write_all(&((value * 4) as u16 + 2u16).to_le_bytes())?;
         return Ok(2);
     }
 
@@ -32,13 +30,11 @@ pub fn encode_var_uint<W: Write>(output: &mut W, value: u64) -> IonResult<usize>
             //
             // There's one continuation flag bit for each encoded byte. To set the bits:
             // * Left shift a `1` by the number of bytes minus one.
-            // * Subtract one from the resulting mask.
             //
             // For example, if `num_encoded_bytes` is 5, then:
             //   1 << 4   =>   1 0000
-            //       -1   =>   0 1111
             //      End flag --^ ^^^^-- Four more bytes follow
-            let flag_bits = (1u64 << (num_encoded_bytes - 1)) - 1;
+            let flag_bits = 1u64 << (num_encoded_bytes - 1);
             // Left shift the value to accommodate the trailing flag bits and then OR them together
             let encoded_value = (value << num_encoded_bytes) | flag_bits;
             let le_bytes = &encoded_value.to_le_bytes()[..num_encoded_bytes as usize];
@@ -49,22 +45,22 @@ pub fn encode_var_uint<W: Write>(output: &mut W, value: u64) -> IonResult<usize>
             // When combined with the continuation flags, the value is too large to be encoded in
             // a u64. It will be nine bytes in all.
             //
-            // The first byte is always 0xFF, indicating that at least 8 more bytes follow.
-            output.write_all(&[0xFF])?;
-            // We need to leave a `0` in the low bit of the next byte to be the End flag. Because
+            // The first byte is always 0x00, indicating that at least 8 more bytes follow.
+            output.write_all(&[0x00])?;
+            // We need to leave a `1` in the low bit of the next byte to be the End flag. Because
             // we need fewer than 64 bits for magnitude, we can encode the remainder of the data
             // in a u64.
-            let encoded_value = value << 1; // Leave a trailing `0` in the lowest bit
+            let encoded_value = (value << 1) + 1; // Leave a trailing `1` in the lowest bit
             let le_bytes = &encoded_value.to_le_bytes()[..];
             output.write_all(le_bytes)?;
             Ok(9)
         }
         64 => {
             // The first is always 0xFF, indicating that at least 8 more bytes follow.
-            // The second has two more continuation flag bits (`01`); the value is 10 bytes long.
+            // The second has two more continuation flag bits (`10`); the value is 10 bytes long.
             // We can fit 6 bits of magnitude in this second byte.
-            let second_byte = ((value & 0b111111) << 2) as u8 | 0b01u8;
-            output.write_all(&[0xFF, second_byte])?;
+            let second_byte = ((value & 0b111111) << 2) as u8 | 0b10u8;
+            output.write_all(&[0x00, second_byte])?;
             // The remaining 58 bits of magnitude can be encoded in a u64.
             let remaining_magnitude = value >> 6;
             output.write_all(&remaining_magnitude.to_le_bytes()[..])?;
@@ -87,13 +83,14 @@ pub fn decode_var_uint(bytes: &[u8]) -> IonResult<(usize, u64)> {
     };
 
     match (bytes[0], bytes[1]) {
-        (0xFF, b2) if b2 & 0b11 == 0b11 => {
-            // It's more than 10 bytes. We're not equipped to handle this.
+        (0x00, b2) if b2 & 0b11 == 0b00 => {
+            // The flag bits in the second byte indicate at least two more bytes, meaning the total
+            // length is more than 10 bytes. We're not equipped to handle this.
             decoding_error("found a >10 byte VarUInt too large to fit in a u64")
         }
-        (0xFF, b2) if b2 & 0b01 == 0b01 => {
-            // The lowest bit of the second byte is set. The encoding is 10 bytes; there are 64 bits
-            // of magnitude.
+        (0x00, b2) if b2 & 0b11 == 0b10 => {
+            // The lowest bit of the second byte is empty, the next lowest is not. The encoding
+            // is 10 bytes; there are 64 bits of magnitude.
             let low_six = b2 >> 2;
             let mut remaining_data = &bytes[2..];
             let remaining_magnitude = remaining_data.read_u64::<LittleEndian>()?;
@@ -104,7 +101,7 @@ pub fn decode_var_uint(bytes: &[u8]) -> IonResult<(usize, u64)> {
             let value = (remaining_magnitude << 6) | low_six as u64;
             Ok((10, value))
         }
-        (0xFF, _) => {
+        (0x00, _) => {
             // The lowest bit of the second byte is not set. The encoding is 9 bytes. There are
             // 57-63 bits of magnitude. We can decode the remaining bytes in a u64.
             let mut remaining_data = &bytes[1..];
@@ -113,8 +110,8 @@ pub fn decode_var_uint(bytes: &[u8]) -> IonResult<(usize, u64)> {
             Ok((9, value))
         }
         (b1, _) => {
-            // The common case. There 7 bytes' worth of magnitude to decode.
-            let num_encoded_bytes = b1.trailing_ones() as usize + 1;
+            // The common case. There 7 bytes' worth of magnitude (or fewer) to decode.
+            let num_encoded_bytes = b1.trailing_zeros() as usize + 1;
             let num_encoded_bits = 8 * num_encoded_bytes;
             // Get a mask with the low 'n' bits set
             let mask = 1u64
@@ -131,8 +128,8 @@ pub fn decode_var_uint(bytes: &[u8]) -> IonResult<(usize, u64)> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::binary::var_uint::VarUInt;
-    use crate::ion_1_1::{decode_var_uint, encode_var_uint};
     use rand::prelude::*;
 
     pub fn generate_integers(int_size_in_bytes: usize, num_ints: usize) -> Vec<u64> {
@@ -159,22 +156,26 @@ mod tests {
 
     #[test]
     fn decode_1_1() {
-        let original_data = &generate_integers(8, 3);
-        let encoded_v1_1_data = &mut Vec::new();
-        let decoded_v1_1_data = &mut Vec::new();
-        for integer in original_data {
-            let _encoded_size = encode_var_uint(encoded_v1_1_data, *integer).unwrap();
-            // println!("Encoding integer {}", integer);
+        for size in 1..=8 {
+            let original_data = &generate_integers(size, 1000);
+            let encoded_v1_1_data = &mut Vec::new();
+            let decoded_v1_1_data = &mut Vec::new();
+            for integer in original_data {
+                let _encoded_size = encode_var_uint(encoded_v1_1_data, *integer).unwrap();
+                // println!("Encoding integer {}", integer);
+            }
+            // println!("Encoded bytes: {:x?}", encoded_v1_1_data);
+            let mut position: usize = 0;
+            let end_of_stream = encoded_v1_1_data.len();
+            while position < end_of_stream {
+                let (encoded_size, value) =
+                    decode_var_uint(&encoded_v1_1_data[position..]).unwrap();
+                position += encoded_size;
+                decoded_v1_1_data.push(value);
+            }
+            assert_eq!(decoded_v1_1_data.len(), 1000);
+            assert_eq!(decoded_v1_1_data, original_data);
         }
-        // println!("Encoded bytes: {:x?}", encoded_v1_1_data);
-        let mut position: usize = 0;
-        let end_of_stream = encoded_v1_1_data.len();
-        while position < end_of_stream {
-            let (encoded_size, value) = decode_var_uint(&encoded_v1_1_data[position..]).unwrap();
-            position += encoded_size;
-            decoded_v1_1_data.push(value);
-        }
-        assert_eq!(decoded_v1_1_data, original_data);
     }
 
     #[test]
