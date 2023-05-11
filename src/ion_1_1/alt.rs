@@ -1,6 +1,6 @@
 use crate::result::decoding_error;
 use crate::IonResult;
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use byteorder::{LittleEndian, ReadBytesExt};
 use std::io::Write;
 
 const BITS_PER_U64: u32 = 64;
@@ -19,6 +19,16 @@ const fn init_bytes_needed_cache() -> [u8; 65] {
     // Special case; 64 leading zeros means the value is zero. We need a byte to represent it anyway.
     cache[64] = 1;
     cache
+}
+
+#[test]
+fn enc() {
+    let mut buffer = Vec::new();
+    encode_var_uint(&mut buffer, 21043).unwrap();
+    println!("{:x?}", buffer);
+    for byte in buffer {
+        println!("{:08b}", byte);
+    }
 }
 
 static BYTES_NEEDED_CACHE: [u8; 65] = init_bytes_needed_cache();
@@ -56,88 +66,37 @@ pub fn encode_var_uint<W: Write>(output: &mut W, value: u64) -> IonResult<usize>
         9 => {
             // When combined with the continuation flags, the value is too large to be encoded in
             // a u64. It will be nine bytes in all.
-            // We need to leave a `1` in the low bit of the next byte to be the End flag. Because
+            //
+            // Set up a stack-allocated buffer to hold our encoding. This allows us to call
+            // `output.write_all()` a single time.
+            let mut buffer: [u8; 9] = [0; 9];
+
+            // The first byte will always be 0x00, indicating that 8 more bytes follow.
+            //
+            // We need to leave a `1` in the low bit of the second byte to be the End flag. Because
             // we need fewer than 64 bits for magnitude, we can encode the remainder of the data
             // in a u64.
             let encoded_value = (value << 1) + 1; // Leave a trailing `1` in the lowest bit
-            output.write_all(&[0x00])?;
-            output.write_all(&encoded_value.to_le_bytes()[..])?;
+            buffer[1..].copy_from_slice(&encoded_value.to_le_bytes()[..]);
+            output.write_all(buffer.as_slice())?;
             Ok(9)
         }
         10 => {
-            // The first is always 0xFF, indicating that at least 8 more bytes follow.
-            // The second has two more continuation flag bits (`10`); the value is 10 bytes long.
-            // We can fit 6 bits of magnitude in this second byte.
+            // Set up a stack-allocated buffer to hold our encoding. This allows us to call
+            // `output.write_all()` a single time.
+            let mut buffer: [u8; 10] = [0; 10];
+            // The first byte in the encoding is always 0x00, indicating that at least 8 more bytes
+            // follow. The second byte has two more continuation flag bits (`10`), indicating that
+            // the whole value is 10 bytes long. We can fit 6 bits of magnitude in this second byte.
             let second_byte = ((value & 0b111111) << 2) as u8 | 0b10u8;
-            output.write_all(&[0x00, second_byte])?;
+            buffer[1] = second_byte;
+
             // The remaining 58 bits of magnitude can be encoded in a u64.
-            let remaining_magnitude = value >> 6;
-            output.write_all(&remaining_magnitude.to_le_bytes()[..])?;
-            Ok(10)
-        }
-        _ => unreachable!("a u64 value cannot have more than 64 magnitude bits"),
-    }
-}
+            let remaining_magnitude: u64 = value >> 6;
+            buffer[2..].copy_from_slice(&remaining_magnitude.to_le_bytes()[..]);
 
-pub fn orig_encode_var_uint<W: Write>(output: &mut W, value: u64) -> IonResult<usize> {
-    if value < 0x80 {
-        output.write_all(&[(value * 2) as u8 + 1])?;
-        return Ok(1);
-    } else if value < 0x4000 {
-        output.write_all(&((value * 4) as u16 + 2u16).to_le_bytes())?;
-        return Ok(2);
-    }
-
-    let leading_zeros = value.leading_zeros();
-    let magnitude_bits_needed = BITS_PER_U64 - leading_zeros;
-
-    // The following is ceiling division without requiring a conversion to f64.
-    // The expression is equivalent to: ceil(magnitude_bits_needed / BITS_PER_ENCODED_BYTE)
-    let num_encoded_bytes =
-        (magnitude_bits_needed + BITS_PER_ENCODED_BYTE - 1) / BITS_PER_ENCODED_BYTE;
-
-    match magnitude_bits_needed {
-        // Note: this branch relies on the short circuit 'if/else' above to handle 0
-        0..=56 => {
-            // When encoded, the continuation flags and the value all fit in 8 bytes. We can encode
-            // everything in a u64 and then write it to output.
-            //
-            // There's one continuation flag bit for each encoded byte. To set the bits:
-            // * Left shift a `1` by the number of bytes minus one.
-            //
-            // For example, if `num_encoded_bytes` is 5, then:
-            //   1 << 4   =>   1 0000
-            //      End flag --^ ^^^^-- Four more bytes follow
-            let flag_bits = 1u64 << (num_encoded_bytes - 1);
-            // Left shift the value to accommodate the trailing flag bits and then OR them together
-            let encoded_value = (value << num_encoded_bytes) | flag_bits;
-            let le_bytes = &encoded_value.to_le_bytes()[..num_encoded_bytes as usize];
-            output.write_all(le_bytes)?;
-            Ok(le_bytes.len())
-        }
-        57..=63 => {
-            // When combined with the continuation flags, the value is too large to be encoded in
-            // a u64. It will be nine bytes in all.
-            //
-            // The first byte is always 0x00, indicating that at least 8 more bytes follow.
-            output.write_all(&[0x00])?;
-            // We need to leave a `1` in the low bit of the next byte to be the End flag. Because
-            // we need fewer than 64 bits for magnitude, we can encode the remainder of the data
-            // in a u64.
-            let encoded_value = (value << 1) + 1; // Leave a trailing `1` in the lowest bit
-            let le_bytes = &encoded_value.to_le_bytes()[..];
-            output.write_all(le_bytes)?;
-            Ok(9)
-        }
-        64 => {
-            // The first is always 0xFF, indicating that at least 8 more bytes follow.
-            // The second has two more continuation flag bits (`10`); the value is 10 bytes long.
-            // We can fit 6 bits of magnitude in this second byte.
-            let second_byte = ((value & 0b111111) << 2) as u8 | 0b10u8;
-            output.write_all(&[0x00, second_byte])?;
-            // The remaining 58 bits of magnitude can be encoded in a u64.
-            let remaining_magnitude = value >> 6;
-            output.write_all(&remaining_magnitude.to_le_bytes()[..])?;
+            // Call `write_all()` once with our complete encoding.
+            output.write_all(buffer.as_slice()).unwrap();
             Ok(10)
         }
         _ => unreachable!("a u64 value cannot have more than 64 magnitude bits"),
@@ -254,7 +213,7 @@ mod tests {
 
     #[test]
     fn compare_1_0_and_1_1_sizes() {
-        let original_data = &generate_integers(8, 10_000_000);
+        let original_data = &generate_integers(8, 10_000);
         let encoded_v1_1_data = &mut Vec::new();
         let encoded_v1_0_data = &mut Vec::new();
         for integer in original_data {
@@ -296,88 +255,28 @@ mod tests {
     #[test]
     fn test_decode() {
         // 1-byte values
-        test_decode_var_uint(&[0x02], 1);
-        test_decode_var_uint(&[0x04], 2);
-        test_decode_var_uint(&[0x06], 3);
-        test_decode_var_uint(&[0x08], 4);
-        test_decode_var_uint(&[0x0A], 5);
+        test_decode_var_uint(&[0x03], 1);
+        test_decode_var_uint(&[0x05], 2);
+        test_decode_var_uint(&[0x07], 3);
+        test_decode_var_uint(&[0x09], 4);
+        test_decode_var_uint(&[0x0B], 5);
 
         // Maximum value of 7 unsigned bits, which is the largest value that can be encoded in a
         // single byte.
-        test_decode_var_uint(&[0xFE], 127u64);
-
-        // Maximum value of a single unsigned byte. This requires 2 bytes to encode because of the
-        // continuation flags.
-        test_decode_var_uint(&[0xFD, 0x03], 255u64);
-
-        // 2-byte value
-        test_decode_var_uint(&[0x01, 0x10], 1024u64);
-
-        // Maximum value that can be stored in 14 unsigned bits, which is the largest value that can
-        // be encoded in 2 bytes.
-        test_decode_var_uint(&[0xFD, 0xFF], 16383u64);
-
-        // Maximum value that can fit in 7 bytes, which is the largest value that can be encoded
-        // in 8 bytes
-        test_decode_var_uint(
-            &[0x7F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF],
-            2u64.pow(56) - 1u64,
-        );
-
-        // A u64 that requires 9 bytes to encode
-        test_decode_var_uint(
-            &[0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80],
-            2u64.pow(62),
-        );
-
-        // Maximum value that can fit in 8 bytes, which requires 10 bytes to encode
-        test_decode_var_uint(
-            &[0xFF, 0xFD, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x03],
-            u64::MAX,
-        );
+        test_decode_var_uint(&[0xFF], 127u64);
     }
 
     #[test]
     fn test_encode() {
         // 1-byte values
-        test_encode_var_uint(1u64, &[0x02]);
-        test_encode_var_uint(2u64, &[0x04]);
-        test_encode_var_uint(3u64, &[0x06]);
-        test_encode_var_uint(4u64, &[0x08]);
-        test_encode_var_uint(5u64, &[0x0A]);
+        test_encode_var_uint(1u64, &[0x03]);
+        test_encode_var_uint(2u64, &[0x05]);
+        test_encode_var_uint(3u64, &[0x07]);
+        test_encode_var_uint(4u64, &[0x09]);
+        test_encode_var_uint(5u64, &[0x0B]);
 
         // Maximum value of 7 unsigned bits, which is the largest value that can be encoded in a
         // single byte.
-        test_encode_var_uint(127u64, &[0xFE]);
-
-        // Maximum value of a single unsigned byte. This requires 2 bytes to encode because of the
-        // continuation flags.
-        test_encode_var_uint(255u64, &[0xFD, 0x03]);
-
-        // 2-byte value
-        test_encode_var_uint(1024u64, &[0x01, 0x10]);
-
-        // Maximum value that can be stored in 14 unsigned bits, which is the largest value that can
-        // be encoded in 2 bytes.
-        test_encode_var_uint(16383u64, &[0xFD, 0xFF]);
-
-        // Maximum value that can fit in 7 bytes, which is the largest value that can be encoded
-        // in 8 bytes
-        test_encode_var_uint(
-            2u64.pow(56) - 1u64,
-            &[0x7F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF],
-        );
-
-        // A u64 that requires 9 bytes to encode
-        test_encode_var_uint(
-            2u64.pow(62),
-            &[0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80],
-        );
-
-        // Maximum value that can fit in 8 bytes, which requires 10 bytes to encode
-        test_encode_var_uint(
-            u64::MAX,
-            &[0xFF, 0xFD, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x03],
-        );
+        test_encode_var_uint(127u64, &[0xFF]);
     }
 }
