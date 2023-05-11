@@ -1,6 +1,6 @@
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use ion_rs::binary::var_uint::VarUInt;
-use ion_rs::ion_1_1::{decode_var_uint, encode_var_uint};
+use ion_rs::ion_1_1::{alt, decode_var_uint, encode_var_uint};
 use rand::prelude::*;
 
 pub fn generate_integers(int_size_in_bytes: usize, num_ints: usize) -> Vec<u64> {
@@ -60,7 +60,8 @@ fn roundtrip_var_uint(c: &mut Criterion) {
                 b.iter(|| {
                     encoded_v1_1_data.clear();
                     for integer in original_data {
-                        let _encoded_size = encode_var_uint(encoded_v1_1_data, *integer).unwrap();
+                        let _encoded_size =
+                            alt::encode_var_uint(encoded_v1_1_data, *integer).unwrap();
                     }
                     black_box(encoded_v1_1_data.len());
                 });
@@ -98,7 +99,7 @@ fn roundtrip_var_uint(c: &mut Criterion) {
                     let end_of_stream = encoded_v1_1_data.len();
                     while position < end_of_stream {
                         let (encoded_size, value) =
-                            decode_var_uint(&encoded_v1_1_data[position..]).unwrap();
+                            alt::decode_var_uint(&encoded_v1_1_data[position..]).unwrap();
                         position += encoded_size;
                         decoded_v1_1_data.push(value);
                     }
@@ -108,6 +109,9 @@ fn roundtrip_var_uint(c: &mut Criterion) {
         );
 
         group.finish();
+
+        println!("1.0 values: {}", decoded_v1_0_data.len());
+        println!("1.1 values: {}", decoded_v1_1_data.len());
 
         // There is no difference in the two formats' encoded sizes
         assert_eq!(encoded_v1_0_data.len(), encoded_v1_1_data.len());
