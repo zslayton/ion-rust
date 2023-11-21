@@ -1,6 +1,7 @@
 #![allow(non_camel_case_types)]
 
 pub mod annotate;
+pub mod binary;
 pub mod write_as_ion;
 
 use delegate::delegate;
@@ -30,14 +31,14 @@ pub trait LazyEncoder<W: Write>: 'static + Sized + Debug + Clone + Copy {
     type Writer: LazyRawWriter<W, Self>;
 
     /// A single-use type that can emit an Ion value.
-    type ValueWriter<'a>: ValueWriter<'a, W, Self>
-    where
-        W: 'a;
+    // type ValueWriter<'a>: ValueWriter<'a, W, Self>
+    // where
+    //     W: 'a;
 
     /// A single-use type that can emit a sequence of annotations and then return a [`ValueWriter`].
-    type AnnotatedValueWriter<'a>: AnnotatedValueWriter<'a, W, Self>
-    where
-        W: 'a;
+    // type AnnotatedValueWriter<'a>: AnnotatedValueWriter<'a, W, Self>
+    // where
+    //     W: 'a;
 
     /// Allows the application to write a (potentially heterogeneously typed) list without necessarily
     /// having all of its child values in memory.
@@ -58,8 +59,8 @@ pub trait LazyEncoder<W: Write>: 'static + Sized + Debug + Clone + Copy {
 
 impl<W: Write> LazyEncoder<W> for TextEncoding_1_0 {
     type Writer = LazyRawTextWriter_1_0<W>;
-    type ValueWriter<'a> = TextValueWriter_1_0<'a, W> where W: 'a;
-    type AnnotatedValueWriter<'a> = TextAnnotatedValueWriter_1_0<'a, W> where W: 'a;
+    // type ValueWriter<'a> = TextValueWriter_1_0<'a, W> where W: 'a;
+    // type AnnotatedValueWriter<'a> = TextAnnotatedValueWriter_1_0<'a, W> where W: 'a;
     type ListWriter<'a> = TextListWriter_1_0<'a, W> where W: 'a;
     type SExpWriter<'a> = TextSExpWriter_1_0<'a, W> where W: 'a;
     type StructWriter<'a> = TextStructWriter_1_0<'a, W> where W: 'a;
@@ -70,6 +71,7 @@ impl<W: Write> LazyEncoder<W> for TextEncoding_1_0 {
 
 /// One-shot methods that take a (possibly empty) sequence of annotations to encode and return a ValueWriter.
 pub trait AnnotatedValueWriter<'a, W: Write, E: LazyEncoder<W>> {
+    type ValueWriter: ValueWriter<'a, W, E>;
     /// Writes the provided annotations to the output stream and returns a [`ValueWriter`] that can
     /// be used to serialize the value itself.
     ///
@@ -82,10 +84,10 @@ pub trait AnnotatedValueWriter<'a, W: Write, E: LazyEncoder<W>> {
     >(
         self,
         annotations: IterType,
-    ) -> IonResult<E::ValueWriter<'a>>;
+    ) -> IonResult<Self::ValueWriter>;
 
     /// Performs no operations and returns a [`ValueWriter`].
-    fn no_annotations(self) -> E::ValueWriter<'a>;
+    fn no_annotations(self) -> Self::ValueWriter;
 }
 
 pub trait ValueWriter<'a, W: Write, E: LazyEncoder<W>> {
@@ -107,17 +109,10 @@ pub trait ValueWriter<'a, W: Write, E: LazyEncoder<W>> {
 }
 
 pub trait LazyRawWriter<W: Write, E: LazyEncoder<W>> {
-    fn new(output: W) -> Self;
+    fn new(output: W) -> IonResult<Self>
+    where
+        Self: Sized;
     fn write<V: WriteAsIon>(&mut self, value: V) -> IonResult<&mut Self>;
-
-    fn value_writer(&mut self) -> E::ValueWriter<'_>;
-
-    fn list_writer(&mut self) -> IonResult<E::ListWriter<'_>> {
-        self.value_writer().list_writer()
-    }
-    fn sexp_writer(&mut self) -> IonResult<E::SExpWriter<'_>> {
-        self.value_writer().sexp_writer()
-    }
     fn flush(&mut self) -> IonResult<()>;
 }
 
@@ -207,15 +202,14 @@ impl<W: Write> LazyRawTextWriter_1_0<W> {
 }
 
 impl<W: Write> LazyRawWriter<W, TextEncoding_1_0> for LazyRawTextWriter_1_0<W> {
-    fn new(output: W) -> Self {
-        LazyRawTextWriter_1_0::new(output)
+    fn new(output: W) -> IonResult<Self> {
+        Ok(LazyRawTextWriter_1_0::new(output))
     }
     // Delegate the trait methods to the inherent methods; this allows a version of these
     // methods to be called on the concrete type even when the trait is not in scope.
     delegate! {
         to self {
             fn write<V: WriteAsIon>(&mut self, value: V) -> IonResult<&mut Self>;
-            fn value_writer(&mut self) -> TextValueWriter_1_0<'_, W>;
             fn flush(&mut self) -> IonResult<()>;
         }
     }
@@ -243,6 +237,8 @@ pub struct TextAnnotatedValueWriter_1_0<'a, W: Write> {
 impl<'a, W: Write> AnnotatedValueWriter<'a, W, TextEncoding_1_0>
     for TextAnnotatedValueWriter_1_0<'a, W>
 {
+    type ValueWriter = TextValueWriter_1_0<'a, W>;
+
     fn write_annotations<
         SymbolType: AsRawSymbolTokenRef,
         IterType: Iterator<Item = SymbolType> + Clone,

@@ -46,7 +46,7 @@ impl VarInt {
     }
 
     /// Writes an `i64` to `sink`, returning the number of bytes written.
-    pub fn write_i64<W: Write>(sink: &mut W, value: i64) -> IonResult<usize> {
+    pub fn write_i64<W: Write + ?Sized>(sink: &mut W, value: i64) -> IonResult<usize> {
         // An i64 is 8 bytes of data. The VarInt encoding will add one continuation bit per byte
         // as well as a sign bit, for a total of 9 extra bits. Therefore, the largest encoding
         // of an i64 will be just over 9 bytes.

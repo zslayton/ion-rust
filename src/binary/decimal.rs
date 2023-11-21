@@ -44,7 +44,7 @@ pub trait DecimalBinaryEncoder {
 
 impl<W> DecimalBinaryEncoder for W
 where
-    W: Write,
+    W: Write + ?Sized,
 {
     fn encode_decimal(&mut self, decimal: &Decimal) -> IonResult<usize> {
         // 0d0 has no representation, as per the spec.

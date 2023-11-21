@@ -40,7 +40,7 @@ impl DecodedInt {
 
     /// Encodes the provided `value` as an Int and writes it to the provided `sink`.
     /// Returns the number of bytes written.
-    pub fn write_i64<W: Write>(sink: &mut W, value: i64) -> IonResult<usize> {
+    pub fn write_i64<W: Write + ?Sized>(sink: &mut W, value: i64) -> IonResult<usize> {
         let magnitude = value.unsigned_abs();
         // Using leading_zeros() to determine how many empty bytes we can ignore.
         // We subtract one from the number of leading bits to leave space for a sign bit
@@ -63,7 +63,7 @@ impl DecodedInt {
     ///
     /// This method is similar to [Self::write_i64]. However, because an i64 cannot represent a negative
     /// zero, a separate method is required.
-    pub fn write_negative_zero<W: Write>(sink: &mut W) -> IonResult<usize> {
+    pub fn write_negative_zero<W: Write + ?Sized>(sink: &mut W) -> IonResult<usize> {
         sink.write_all(&[INT_NEGATIVE_ZERO])?;
         Ok(1)
     }
