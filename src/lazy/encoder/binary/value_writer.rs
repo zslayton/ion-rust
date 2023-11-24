@@ -1,7 +1,7 @@
 use crate::lazy::encoder::binary::{
-    BinaryListWriter_1_0, BinarySExpWriter_1_0, BinaryStructWriter_1_0,
+    BinaryContainerWriter_1_0, BinaryListWriter_1_0, BinarySExpWriter_1_0, BinaryStructWriter_1_0,
 };
-use crate::lazy::encoder::{AnnotatedValueWriter, ValueWriter};
+use crate::lazy::encoder::{AnnotatedValueWriter, SequenceWriter, StructWriter, ValueWriter};
 use crate::raw_symbol_token_ref::AsRawSymbolTokenRef;
 use crate::{Decimal, Int, IonResult, IonType, RawSymbolTokenRef, SymbolId, Timestamp};
 use std::mem;
@@ -240,26 +240,73 @@ impl<'value, 'top> BinaryValueWriter_1_0<'value, 'top> {
         self.write_lob(bytes, 0xA0)
     }
 
-    pub fn list_writer(self) -> IonResult<BinaryListWriter_1_0<'value, 'top>> {
-        Ok(BinaryListWriter_1_0::new(
+    fn list_writer(self) -> IonResult<BinaryListWriter_1_0<'value, 'top>> {
+        Ok(BinaryListWriter_1_0::new(BinaryContainerWriter_1_0::new(
+            0xB0,
             self.allocator,
             self.encoding_buffer,
-        ))
+        )))
     }
 
-    pub fn sexp_writer(self) -> IonResult<BinarySExpWriter_1_0<'value>> {
-        todo!()
+    fn sexp_writer(self) -> IonResult<BinarySExpWriter_1_0<'value, 'top>> {
+        Ok(BinarySExpWriter_1_0::new(BinaryContainerWriter_1_0::new(
+            0xC0,
+            self.allocator,
+            self.encoding_buffer,
+        )))
     }
 
-    pub fn struct_writer(self) -> IonResult<BinaryStructWriter_1_0<'value>> {
-        todo!()
+    fn struct_writer(self) -> IonResult<BinaryStructWriter_1_0<'value, 'top>> {
+        let container_writer =
+            BinaryContainerWriter_1_0::new(0xD0, &self.allocator, self.encoding_buffer);
+        Ok(BinaryStructWriter_1_0::new(container_writer))
+    }
+
+    fn write_list<
+        F: for<'a> FnMut(
+            &'a mut BinaryListWriter_1_0<'value, 'top>,
+        ) -> IonResult<&'a mut BinaryListWriter_1_0<'value, 'top>>,
+    >(
+        self,
+        mut list_fn: F,
+    ) -> IonResult<()> {
+        let mut list_writer = self.list_writer()?;
+        list_fn(&mut list_writer)?;
+        list_writer.end()
+    }
+
+    fn write_sexp<
+        F: for<'a> FnMut(
+            &'a mut BinarySExpWriter_1_0<'value, 'top>,
+        ) -> IonResult<&'a mut BinarySExpWriter_1_0<'value, 'top>>,
+    >(
+        self,
+        mut sexp_fn: F,
+    ) -> IonResult<()> {
+        let mut sexp_writer = self.sexp_writer()?;
+        sexp_fn(&mut sexp_writer)?;
+        sexp_writer.end()
+    }
+
+    fn write_struct<
+        F: for<'a> FnMut(
+            &'a mut BinaryStructWriter_1_0<'value, 'top>,
+        ) -> IonResult<&'a mut BinaryStructWriter_1_0<'value, 'top>>,
+    >(
+        self,
+        mut struct_fn: F,
+    ) -> IonResult<()> {
+        let mut struct_writer = self.struct_writer()?;
+        struct_fn(&mut struct_writer)?;
+        struct_writer.end()
     }
 }
 
 impl<'value, 'top> ValueWriter for BinaryValueWriter_1_0<'value, 'top> {
     type ListWriter = BinaryListWriter_1_0<'value, 'top>;
-    type SExpWriter = BinarySExpWriter_1_0<'value>;
-    type StructWriter = BinaryStructWriter_1_0<'value>;
+    type SExpWriter = BinarySExpWriter_1_0<'value, 'top>;
+    type StructWriter = BinaryStructWriter_1_0<'value, 'top>;
+
     delegate! {
         to self {
             fn write_null(self, ion_type: IonType) -> IonResult<()>;
@@ -274,9 +321,18 @@ impl<'value, 'top> ValueWriter for BinaryValueWriter_1_0<'value, 'top> {
             fn write_symbol<A: AsRawSymbolTokenRef>(self, value: A) -> IonResult<()>;
             fn write_clob<A: AsRef<[u8]>>(self, value: A) -> IonResult<()>;
             fn write_blob<A: AsRef<[u8]>>(self, value: A) -> IonResult<()>;
-            fn list_writer(self) -> IonResult<BinaryListWriter_1_0<'value, 'top>>;
-            fn sexp_writer(self) -> IonResult<BinarySExpWriter_1_0<'value>> ;
-            fn struct_writer(self) -> IonResult<BinaryStructWriter_1_0<'value>>;
+            fn write_list<F: FnMut(&mut Self::ListWriter) -> IonResult<&mut Self::ListWriter>>(
+                self,
+                list_fn: F,
+            ) -> IonResult<()>;
+            fn write_sexp<F: FnMut(&mut Self::SExpWriter) -> IonResult<&mut Self::SExpWriter>>(
+                self,
+                sexp_fn: F,
+            ) -> IonResult<()>;
+            fn write_struct<F: FnMut(&mut Self::StructWriter) -> IonResult<&mut Self::StructWriter>>(
+                self,
+                struct_fn: F,
+            ) -> IonResult<()>;
         }
     }
 }
@@ -312,8 +368,7 @@ impl<'value, 'top> AnnotatedValueWriter for BinaryAnnotatedValueWriter_1_0<'valu
 #[cfg(test)]
 mod tests {
     use crate::lazy::encoder::binary::LazyRawBinaryWriter_1_0;
-    use crate::lazy::encoder::write_as_ion::WriteAsIon;
-    use crate::lazy::encoder::{AnnotatedValueWriter, SequenceWriter, ValueWriter};
+    use crate::lazy::encoder::{AnnotatedValueWriter, LazyRawWriter, SequenceWriter, StructWriter};
     use crate::{Element, IonData, IonResult, RawSymbolTokenRef, Timestamp};
 
     fn writer_test(
@@ -343,7 +398,6 @@ mod tests {
             name
             2023-11-09T
             {{4AEA6g==}}
-            //[1, 2, 3]
         "#;
         let test = |writer: &mut LazyRawBinaryWriter_1_0<&mut Vec<u8>>| {
             writer
@@ -361,24 +415,16 @@ mod tests {
     }
 
     #[test]
+    fn write_empty_list() -> IonResult<()> {
+        let expected = "[]";
+        let test = |writer: &mut LazyRawBinaryWriter_1_0<&mut Vec<u8>>| {
+            writer.value_writer().write_list(|list| Ok(list))
+        };
+        writer_test(expected, test)
+    }
+
+    #[test]
     fn write_list() -> IonResult<()> {
-        struct TestList;
-
-        impl WriteAsIon for TestList {
-            fn write_as_ion<V: AnnotatedValueWriter>(&self, writer: V) -> IonResult<()> {
-                let mut list = writer.without_annotations().list_writer()?;
-                list.write(1)?
-                    .write(false)?
-                    .write(3f32)?
-                    .write("foo")?
-                    .write(RawSymbolTokenRef::SymbolId(4))?
-                    .write(Timestamp::with_ymd(2023, 11, 9).build()?)?
-                    .write([0xE0u8, 0x01, 0x00, 0xEA])?;
-                list.end()?;
-                Ok(())
-            }
-        }
-
         let expected = r#"
             [
                 1,
@@ -388,12 +434,101 @@ mod tests {
                 name,
                 2023-11-09T,
                 {{4AEA6g==}},
-                //[1, 2, 3],
+                // Nested list
+                [1, 2, 3],
             ]
         "#;
         let test = |writer: &mut LazyRawBinaryWriter_1_0<&mut Vec<u8>>| {
-            writer.write(TestList)?;
-            Ok(())
+            writer.value_writer().write_list(|list| {
+                list.write(1)?
+                    .write(false)?
+                    .write(3f32)?
+                    .write("foo")?
+                    .write(RawSymbolTokenRef::SymbolId(4))?
+                    .write(Timestamp::with_ymd(2023, 11, 9).build()?)?
+                    .write([0xE0u8, 0x01, 0x00, 0xEA])?
+                    .write([1, 2, 3])
+            })
+        };
+        writer_test(expected, test)
+    }
+
+    #[test]
+    fn write_empty_sexp() -> IonResult<()> {
+        let expected = "()";
+        let test = |writer: &mut LazyRawBinaryWriter_1_0<&mut Vec<u8>>| {
+            writer.value_writer().write_sexp(|sexp| Ok(sexp))
+        };
+        writer_test(expected, test)
+    }
+
+    #[test]
+    fn write_sexp() -> IonResult<()> {
+        let expected = r#"
+            (
+                1
+                false
+                3e0
+                "foo"
+                name
+                2023-11-09T
+                {{4AEA6g==}}
+                // Nested list
+                [1, 2, 3]
+            )
+        "#;
+        let test = |writer: &mut LazyRawBinaryWriter_1_0<&mut Vec<u8>>| {
+            writer.value_writer().write_sexp(|sexp| {
+                sexp.write(1)?
+                    .write(false)?
+                    .write(3f32)?
+                    .write("foo")?
+                    .write(RawSymbolTokenRef::SymbolId(4))?
+                    .write(Timestamp::with_ymd(2023, 11, 9).build()?)?
+                    .write([0xE0u8, 0x01, 0x00, 0xEA])?
+                    .write([1, 2, 3])
+            })
+        };
+        writer_test(expected, test)
+    }
+
+    #[test]
+    fn write_empty_struct() -> IonResult<()> {
+        let expected = "{}";
+        let test = |writer: &mut LazyRawBinaryWriter_1_0<&mut Vec<u8>>| {
+            writer.value_writer().write_struct(|struct_| Ok(struct_))
+        };
+        writer_test(expected, test)
+    }
+
+    #[test]
+    fn write_struct() -> IonResult<()> {
+        let expected = r#"
+            // This test uses symbol ID field names because the raw writer has no symbol table. 
+            {
+                $0: 1,
+                $1: false,
+                $2: 3e0,
+                $3: "foo",
+                $4: name,
+                $5: 2023-11-09T,
+                $6: {{4AEA6g==}},
+                // Nested list
+                $7: [1, 2, 3],
+            }
+        "#;
+        let test = |writer: &mut LazyRawBinaryWriter_1_0<&mut Vec<u8>>| {
+            writer.value_writer().write_struct(|struct_| {
+                struct_
+                    .write(0, 1)?
+                    .write(1, false)?
+                    .write(2, 3f32)?
+                    .write(3, "foo")?
+                    .write(4, RawSymbolTokenRef::SymbolId(4))?
+                    .write(5, Timestamp::with_ymd(2023, 11, 9).build()?)?
+                    .write(6, [0xE0u8, 0x01, 0x00, 0xEA])?
+                    .write(7, [1, 2, 3])
+            })
         };
         writer_test(expected, test)
     }

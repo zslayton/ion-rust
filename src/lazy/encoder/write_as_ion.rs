@@ -173,12 +173,12 @@ where
     for<'x> &'x T: WriteAsIon,
 {
     fn write_as_ion_value<V: ValueWriter>(&self, writer: V) -> IonResult<()> {
-        let mut list = writer.list_writer()?;
-        for value in *self {
-            list.write(value)?;
-        }
-        list.end()?;
-        Ok(())
+        writer.write_list(|list| {
+            for value in *self {
+                list.write(value)?;
+            }
+            Ok(list)
+        })
     }
 }
 
@@ -187,11 +187,11 @@ where
     T: WriteAsIonValue,
 {
     fn write_as_ion_value<V: ValueWriter>(&self, writer: V) -> IonResult<()> {
-        let mut list = writer.list_writer()?;
-        for value in self {
-            list.write(value)?;
-        }
-        list.end()?;
-        Ok(())
+        writer.write_list(|list| {
+            for value in self {
+                list.write(value)?;
+            }
+            Ok(list)
+        })
     }
 }

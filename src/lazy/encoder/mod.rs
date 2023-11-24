@@ -29,32 +29,6 @@ pub trait LazyEncoder<W: Write>: 'static + Sized + Debug + Clone + Copy {
     /// A writer that serializes Rust values as Ion, emitting the resulting data to an implementation
     /// of [`Write`].
     type Writer: LazyRawWriter<W>;
-
-    // A single-use type that can emit an Ion value.
-    // type ValueWriter<'a>: ValueWriter<'a, W, Self>
-    // where
-    //     W: 'a;
-
-    // A single-use type that can emit a sequence of annotations and then return a [`ValueWriter`].
-    // type AnnotatedValueWriter<'a>: AnnotatedValueWriter<'a, W, Self>
-    // where
-    //     W: 'a;
-
-    // Allows the application to write a (potentially heterogeneously typed) list without necessarily
-    // having all of its child values in memory.
-    // type ListWriter<'a>: SequenceWriter<'a, W, Self>
-    // where
-    //     W: 'a;
-    //
-    // // TODO: Apply trait constraints to the following associated types
-    //
-    // type SExpWriter<'a>: SequenceWriter<'a, W, Self>
-    // where
-    //     W: 'a;
-    // type StructWriter<'a>: StructWriter<'a, W, Self>
-    // where
-    //     W: 'a;
-    // type EExpressionWriter<'a>;
 }
 
 impl<W: Write> LazyEncoder<W> for TextEncoding_1_0 {
@@ -97,9 +71,22 @@ pub trait AnnotatedValueWriter: Sized {
             fn write_symbol<A: AsRawSymbolTokenRef>(self, value: A) -> IonResult<()>;
             fn write_clob<A: AsRef<[u8]>>(self, value: A) -> IonResult<()>;
             fn write_blob<A: AsRef<[u8]>>(self, value: A) -> IonResult<()>;
-            fn list_writer(self) -> IonResult<<Self::ValueWriter as ValueWriter>::ListWriter>;
-            fn sexp_writer(self) -> IonResult<<Self::ValueWriter as ValueWriter>::SExpWriter>;
-            fn struct_writer(self) -> IonResult<<Self::ValueWriter as ValueWriter>::StructWriter>;
+            fn write_list<F: FnMut(&mut <Self::ValueWriter as ValueWriter>::ListWriter) -> IonResult<&mut <Self::ValueWriter as ValueWriter>::ListWriter>>(
+                self,
+                list_fn: F,
+            ) -> IonResult<()>;
+            fn write_sexp<F: FnMut(&mut <Self::ValueWriter as ValueWriter>::SExpWriter) -> IonResult<&mut <Self::ValueWriter as ValueWriter>::SExpWriter>>(
+                self,
+                sexp_fn: F,
+            ) -> IonResult<()>;
+            fn write_struct<
+                F: for<'a> FnMut(
+                    &mut <Self::ValueWriter as ValueWriter>::StructWriter,
+                ) -> IonResult<&mut <Self::ValueWriter as ValueWriter>::StructWriter>,
+            >(
+                self,
+                struct_fn: F,
+            ) -> IonResult<()>;
         }
     }
 }
@@ -123,20 +110,30 @@ pub trait ValueWriter {
     fn write_symbol<A: AsRawSymbolTokenRef>(self, value: A) -> IonResult<()>;
     fn write_clob<A: AsRef<[u8]>>(self, value: A) -> IonResult<()>;
     fn write_blob<A: AsRef<[u8]>>(self, value: A) -> IonResult<()>;
-    fn list_writer(self) -> IonResult<Self::ListWriter>;
-    fn sexp_writer(self) -> IonResult<Self::SExpWriter>;
-    fn struct_writer(self) -> IonResult<Self::StructWriter>;
+
+    fn write_list<F: FnMut(&mut Self::ListWriter) -> IonResult<&mut Self::ListWriter>>(
+        self,
+        list_fn: F,
+    ) -> IonResult<()>;
+    fn write_sexp<F: FnMut(&mut Self::SExpWriter) -> IonResult<&mut Self::SExpWriter>>(
+        self,
+        sexp_fn: F,
+    ) -> IonResult<()>;
+
+    fn write_struct<F: FnMut(&mut Self::StructWriter) -> IonResult<&mut Self::StructWriter>>(
+        self,
+        sexp_fn: F,
+    ) -> IonResult<()>;
 }
 
 pub trait LazyRawWriter<W: Write> {
-    type ValueWriter<'a>: ValueWriter
+    type ValueWriter<'a>: AnnotatedValueWriter
     where
         Self: 'a;
     fn new(output: W) -> IonResult<Self>
     where
         Self: Sized;
-
-    fn value_writer<'a>(&'a mut self) -> Self::ValueWriter<'a>;
+    fn value_writer(&mut self) -> Self::ValueWriter<'_>;
     fn write<V: WriteAsIon>(&mut self, value: V) -> IonResult<&mut Self>;
     fn flush(&mut self) -> IonResult<()>;
 }
@@ -209,32 +206,21 @@ impl<W: Write> LazyRawTextWriter_1_0<W> {
             value_writer: self.value_writer(),
         }
     }
-
-    #[inline]
-    pub fn list_writer(&mut self) -> IonResult<TextListWriter_1_0<'_, W>> {
-        self.value_writer().list_writer()
-    }
-
-    #[inline]
-    pub fn sexp_writer(&mut self) -> IonResult<TextSExpWriter_1_0<'_, W>> {
-        self.value_writer().sexp_writer()
-    }
-
-    #[inline]
-    pub fn struct_writer(&mut self) -> IonResult<TextStructWriter_1_0<'_, W>> {
-        self.value_writer().struct_writer()
-    }
 }
 
 impl<W: Write> LazyRawWriter<W> for LazyRawTextWriter_1_0<W> {
-    type ValueWriter<'a> = TextValueWriter_1_0<'a, W> where Self: 'a;
+    type ValueWriter<'a> = TextAnnotatedValueWriter_1_0<'a, W> where Self: 'a;
 
     fn new(output: W) -> IonResult<Self> {
         Ok(LazyRawTextWriter_1_0::new(output))
     }
 
     fn value_writer(&mut self) -> Self::ValueWriter<'_> {
-        self.value_writer()
+        let value_writer = TextValueWriter_1_0 {
+            writer: self,
+            depth: 0,
+        };
+        TextAnnotatedValueWriter_1_0 { value_writer }
     }
 
     // Delegate the trait methods to the inherent methods; this allows a version of these
@@ -404,16 +390,31 @@ impl<'a, W: Write> ValueWriter for TextValueWriter_1_0<'a, W> {
         Ok(())
     }
 
-    fn list_writer(self) -> IonResult<Self::ListWriter> {
-        TextListWriter_1_0::new(self.writer, self.depth + 1)
+    fn write_list<F: FnMut(&mut Self::ListWriter) -> IonResult<&mut Self::ListWriter>>(
+        self,
+        mut list_fn: F,
+    ) -> IonResult<()> {
+        let mut list_writer = TextListWriter_1_0::new(self.writer, self.depth + 1)?;
+        list_fn(&mut list_writer)?;
+        list_writer.end()
     }
 
-    fn sexp_writer(self) -> IonResult<Self::SExpWriter> {
-        TextSExpWriter_1_0::new(self.writer, self.depth + 1)
+    fn write_sexp<F: FnMut(&mut Self::SExpWriter) -> IonResult<&mut Self::SExpWriter>>(
+        self,
+        mut list_fn: F,
+    ) -> IonResult<()> {
+        let mut sexp_writer = TextSExpWriter_1_0::new(self.writer, self.depth + 1)?;
+        list_fn(&mut sexp_writer)?;
+        sexp_writer.end()
     }
 
-    fn struct_writer(self) -> IonResult<Self::StructWriter> {
-        TextStructWriter_1_0::new(self.writer, self.depth + 1)
+    fn write_struct<F: FnMut(&mut Self::StructWriter) -> IonResult<&mut Self::StructWriter>>(
+        self,
+        mut struct_fn: F,
+    ) -> IonResult<()> {
+        let mut struct_writer = TextStructWriter_1_0::new(self.writer, self.depth + 1)?;
+        struct_fn(&mut struct_writer)?;
+        struct_writer.end()
     }
 }
 
@@ -637,7 +638,7 @@ impl<'a, W: Write> StructWriter for TextStructWriter_1_0<'a, W> {
 #[cfg(test)]
 mod tests {
     use crate::lazy::encoder::annotate::Annotate;
-    use crate::lazy::encoder::{LazyRawTextWriter_1_0, StructWriter};
+    use crate::lazy::encoder::{LazyRawTextWriter_1_0, StructWriter, ValueWriter};
     use crate::symbol_ref::AsSymbolRef;
     use crate::{Element, IonData, IonResult, Timestamp};
 
@@ -725,16 +726,15 @@ mod tests {
             ]
         "#;
         let test = |writer: &mut LazyRawTextWriter_1_0<&mut Vec<u8>>| {
-            let mut list = writer.list_writer()?;
-            list.write(1)?
-                .write(false)?
-                .write(3f32)?
-                .write("foo")?
-                .write("bar".as_symbol_ref())?
-                .write(Timestamp::with_ymd(2023, 11, 9).build()?)?
-                .write(&[0xE0u8, 0x01, 0x00, 0xEA][..])?;
-            list.end()?;
-            Ok(())
+            writer.value_writer().write_list(|list| {
+                list.write(1)?
+                    .write(false)?
+                    .write(3f32)?
+                    .write("foo")?
+                    .write("bar".as_symbol_ref())?
+                    .write(Timestamp::with_ymd(2023, 11, 9).build()?)?
+                    .write(&[0xE0u8, 0x01, 0x00, 0xEA][..])
+            })
         };
         writer_test(expected, test)
     }
@@ -755,17 +755,16 @@ mod tests {
             )
         "#;
         let test = |writer: &mut LazyRawTextWriter_1_0<&mut Vec<u8>>| {
-            let mut sexp = writer.sexp_writer()?;
-            sexp.write(1)?
-                .write(false)?
-                .write(3f32)?
-                .write("foo")?
-                .write("bar".as_symbol_ref())?
-                .write(Timestamp::with_ymd(2023, 11, 9).build()?)?
-                .write([0xE0u8, 0x01, 0x00, 0xEA])?
-                .write([1, 2, 3])?;
-            sexp.end()?;
-            Ok(())
+            writer.value_writer().write_sexp(|sexp| {
+                sexp.write(1)?
+                    .write(false)?
+                    .write(3f32)?
+                    .write("foo")?
+                    .write("bar".as_symbol_ref())?
+                    .write(Timestamp::with_ymd(2023, 11, 9).build()?)?
+                    .write([0xE0u8, 0x01, 0x00, 0xEA])?
+                    .write([1, 2, 3])
+            })
         };
         writer_test(expected, test)
     }
@@ -784,17 +783,16 @@ mod tests {
             }
         "#;
         let test = |writer: &mut LazyRawTextWriter_1_0<&mut Vec<u8>>| {
-            let mut struct_ = writer.struct_writer()?;
-            struct_
-                .write("a", 1)?
-                .write("b", false)?
-                .write("c", 3f32)?
-                .write("d", "foo")?
-                .write("e", "bar".as_symbol_ref())?
-                .write("f", Timestamp::with_ymd(2023, 11, 9).build()?)?
-                .write("g", [0xE0u8, 0x01, 0x00, 0xEA])?;
-            struct_.end()?;
-            Ok(())
+            writer.value_writer().write_struct(|struct_| {
+                struct_
+                    .write("a", 1)?
+                    .write("b", false)?
+                    .write("c", 3f32)?
+                    .write("d", "foo")?
+                    .write("e", "bar".as_symbol_ref())?
+                    .write("f", Timestamp::with_ymd(2023, 11, 9).build()?)?
+                    .write("g", [0xE0u8, 0x01, 0x00, 0xEA])
+            })
         };
         writer_test(expected, test)
     }
