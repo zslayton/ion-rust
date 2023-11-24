@@ -2,11 +2,8 @@ use crate::lazy::encoder::binary::{
     BinaryListWriter_1_0, BinarySExpWriter_1_0, BinaryStructWriter_1_0,
 };
 use crate::lazy::encoder::{AnnotatedValueWriter, ValueWriter};
-use crate::lazy::encoding::BinaryEncoding_1_0;
 use crate::raw_symbol_token_ref::AsRawSymbolTokenRef;
 use crate::{Decimal, Int, IonResult, IonType, RawSymbolTokenRef, SymbolId, Timestamp};
-use std::io::Write;
-use std::marker::PhantomData;
 use std::mem;
 
 use crate::binary::decimal::DecimalBinaryEncoder;
@@ -27,26 +24,19 @@ use num_traits::Zero;
 // Larger length values will need to be written as a VarUInt following the type descriptor.
 pub(crate) const MAX_INLINE_LENGTH: usize = 13;
 
-pub struct BinaryValueWriter_1_0<'a> {
-    encoding_buffer: &'a mut BumpVec<'a, u8>,
-    // allocator: &'a BumpAllocator,
-    // The depth at which the value being written will appear. If this value is 0, this is a top-level
-    // value writer.
-    depth: usize,
-    // This implementation doesn't write directly to output, so the generic `W` is unused.
-    // However, we need to use it for trait compliance so we store it in a PhantomData.
+pub struct BinaryValueWriter_1_0<'value, 'top> {
+    allocator: &'top BumpAllocator,
+    encoding_buffer: &'value mut BumpVec<'top, u8>,
 }
 
-impl<'a> BinaryValueWriter_1_0<'a> {
+impl<'value, 'top> BinaryValueWriter_1_0<'value, 'top> {
     pub fn new(
-        depth: usize,
-        encoding_buffer: &'a mut BumpVec<'a, u8>,
-        // allocator: &'c BumpAllocator,
+        allocator: &'top BumpAllocator,
+        encoding_buffer: &'value mut BumpVec<'top, u8>,
     ) -> Self {
         Self {
-            depth,
+            allocator,
             encoding_buffer,
-            // allocator,
         }
     }
 
@@ -64,7 +54,7 @@ impl<'a> BinaryValueWriter_1_0<'a> {
         self.encoding_buffer.as_slice()
     }
 
-    pub fn write_symbol_id(&mut self, symbol_id: SymbolId) -> IonResult<()> {
+    pub fn write_symbol_id(mut self, symbol_id: SymbolId) -> IonResult<()> {
         const SYMBOL_BUFFER_SIZE: usize = mem::size_of::<u64>();
         let mut buffer = [0u8; SYMBOL_BUFFER_SIZE];
         let mut writer = std::io::Cursor::new(&mut buffer).writer();
@@ -84,7 +74,7 @@ impl<'a> BinaryValueWriter_1_0<'a> {
         Ok(())
     }
 
-    fn write_lob(&mut self, value: &[u8], type_code: u8) -> IonResult<()> {
+    pub fn write_lob(mut self, value: &[u8], type_code: u8) -> IonResult<()> {
         let encoded_length = value.len();
         let type_descriptor: u8;
         if encoded_length <= MAX_INLINE_LENGTH {
@@ -98,11 +88,8 @@ impl<'a> BinaryValueWriter_1_0<'a> {
         self.push_bytes(value);
         Ok(())
     }
-}
 
-// impl<'a, W: Write> ValueWriter<'a, W, BinaryEncoding_1_0> for BinaryValueWriter_1_0<'a> {
-impl<'a> BinaryValueWriter_1_0<'a> {
-    fn write_null(&mut self, ion_type: IonType) -> IonResult<()> {
+    pub fn write_null(mut self, ion_type: IonType) -> IonResult<()> {
         let byte: u8 = match ion_type {
             IonType::Null => 0x0F,
             IonType::Bool => 0x1F,
@@ -122,13 +109,13 @@ impl<'a> BinaryValueWriter_1_0<'a> {
         Ok(())
     }
 
-    fn write_bool(&mut self, value: bool) -> IonResult<()> {
+    pub fn write_bool(mut self, value: bool) -> IonResult<()> {
         let byte: u8 = if value { 0x11 } else { 0x10 };
         self.push_byte(byte);
         Ok(())
     }
 
-    fn write_i64(&mut self, value: i64) -> IonResult<()> {
+    pub fn write_i64(mut self, value: i64) -> IonResult<()> {
         // Get the absolute value of the i64 and store it in a u64.
         let magnitude: u64 = value.unsigned_abs();
         let encoded = uint::encode_u64(magnitude);
@@ -148,7 +135,7 @@ impl<'a> BinaryValueWriter_1_0<'a> {
         Ok(())
     }
 
-    fn write_int(&mut self, value: &Int) -> IonResult<()> {
+    pub fn write_int(mut self, value: &Int) -> IonResult<()> {
         // If the `value` is an `i64`, use `write_i64` and return.
         let value = match &value.data {
             IntData::I64(i) => return self.write_i64(*i),
@@ -183,7 +170,7 @@ impl<'a> BinaryValueWriter_1_0<'a> {
         Ok(())
     }
 
-    fn write_f32(&mut self, value: f32) -> IonResult<()> {
+    pub fn write_f32(mut self, value: f32) -> IonResult<()> {
         if value == 0f32 && !value.is_sign_negative() {
             self.push_byte(0x40);
             return Ok(());
@@ -194,7 +181,7 @@ impl<'a> BinaryValueWriter_1_0<'a> {
         Ok(())
     }
 
-    fn write_f64(&mut self, value: f64) -> IonResult<()> {
+    pub fn write_f64(mut self, value: f64) -> IonResult<()> {
         if value == 0f64 && !value.is_sign_negative() {
             self.push_byte(0x40);
             return Ok(());
@@ -205,17 +192,17 @@ impl<'a> BinaryValueWriter_1_0<'a> {
         Ok(())
     }
 
-    fn write_decimal(&mut self, value: &Decimal) -> IonResult<()> {
+    pub fn write_decimal(self, value: &Decimal) -> IonResult<()> {
         let _encoded_size = self.encoding_buffer.encode_decimal_value(value)?;
         Ok(())
     }
 
-    fn write_timestamp(&mut self, value: &Timestamp) -> IonResult<()> {
+    pub fn write_timestamp(self, value: &Timestamp) -> IonResult<()> {
         let _ = self.encoding_buffer.encode_timestamp_value(value)?;
         Ok(())
     }
 
-    fn write_string<A: AsRef<str>>(&mut self, value: A) -> IonResult<()> {
+    pub fn write_string<A: AsRef<str>>(mut self, value: A) -> IonResult<()> {
         let text: &str = value.as_ref();
         let encoded_length = text.len(); // The number of utf8 bytes
 
@@ -232,7 +219,7 @@ impl<'a> BinaryValueWriter_1_0<'a> {
         Ok(())
     }
 
-    fn write_symbol<A: AsRawSymbolTokenRef>(&mut self, value: A) -> IonResult<()> {
+    pub fn write_symbol<A: AsRawSymbolTokenRef>(self, value: A) -> IonResult<()> {
         match value.as_raw_symbol_token_ref() {
             RawSymbolTokenRef::SymbolId(sid) => self.write_symbol_id(sid),
             RawSymbolTokenRef::Text(_text) => IonResult::illegal_operation(
@@ -241,54 +228,38 @@ impl<'a> BinaryValueWriter_1_0<'a> {
         }
     }
 
-    fn write_clob<A: AsRef<[u8]>>(&mut self, value: A) -> IonResult<()> {
+    pub fn write_clob<A: AsRef<[u8]>>(self, value: A) -> IonResult<()> {
         let bytes: &[u8] = value.as_ref();
         // The clob type descriptor's high nibble is type code 9
         self.write_lob(bytes, 0x90)
     }
 
-    fn write_blob<A: AsRef<[u8]>>(&mut self, value: A) -> IonResult<()> {
+    pub fn write_blob<A: AsRef<[u8]>>(self, value: A) -> IonResult<()> {
         let bytes: &[u8] = value.as_ref();
         // The blob type descriptor's high nibble is type code 10 (0xA)
         self.write_lob(bytes, 0xA0)
     }
 
-    fn list_writer(&mut self) -> IonResult<BinaryListWriter_1_0<'a>> {
+    pub fn list_writer(self) -> IonResult<BinaryListWriter_1_0<'value, 'top>> {
+        Ok(BinaryListWriter_1_0::new(
+            self.allocator,
+            self.encoding_buffer,
+        ))
+    }
+
+    pub fn sexp_writer(self) -> IonResult<BinarySExpWriter_1_0<'value>> {
         todo!()
     }
 
-    fn sexp_writer(&mut self) -> IonResult<BinarySExpWriter_1_0<'a>> {
-        todo!()
-    }
-
-    fn struct_writer(&mut self) -> IonResult<BinaryStructWriter_1_0<'a>> {
+    pub fn struct_writer(self) -> IonResult<BinaryStructWriter_1_0<'value>> {
         todo!()
     }
 }
 
-impl<'a, W: Write> ValueWriter<'a, W, BinaryEncoding_1_0> for BinaryValueWriter_1_0<'a> {
-    delegate! {
-        to (&mut self) {
-            fn write_null(mut self, ion_type: IonType) -> IonResult<()>;
-            fn write_bool(mut self, value: bool) -> IonResult<()>;
-            fn write_i64(mut self, value: i64) -> IonResult<()>;
-            fn write_int(mut self, value: &Int) -> IonResult<()>;
-            fn write_f32(mut self, value: f32) -> IonResult<()>;
-            fn write_f64(mut self, value: f64) -> IonResult<()>;
-            fn write_decimal(mut self, value: &Decimal) -> IonResult<()>;
-            fn write_timestamp(mut self, value: &Timestamp) -> IonResult<()> ;
-            fn write_string<A: AsRef<str>>(mut self, value: A) -> IonResult<()> ;
-            fn write_symbol<A: AsRawSymbolTokenRef>(mut self, value: A) -> IonResult<()>;
-            fn write_clob<A: AsRef<[u8]>>(mut self, value: A) -> IonResult<()>;
-            fn write_blob<A: AsRef<[u8]>>(mut self, value: A) -> IonResult<()>;
-            fn list_writer(mut self) -> IonResult<BinaryListWriter_1_0<'a>>;
-            fn sexp_writer(mut self) -> IonResult<BinarySExpWriter_1_0<'a>> ;
-            fn struct_writer(mut self) -> IonResult<BinaryStructWriter_1_0<'a>>;
-        }
-    }
-}
-
-impl<'a, W: Write> ValueWriter<'a, W, BinaryEncoding_1_0> for &mut BinaryValueWriter_1_0<'a> {
+impl<'value, 'top> ValueWriter for BinaryValueWriter_1_0<'value, 'top> {
+    type ListWriter = BinaryListWriter_1_0<'value, 'top>;
+    type SExpWriter = BinarySExpWriter_1_0<'value>;
+    type StructWriter = BinaryStructWriter_1_0<'value>;
     delegate! {
         to self {
             fn write_null(self, ion_type: IonType) -> IonResult<()>;
@@ -303,69 +274,37 @@ impl<'a, W: Write> ValueWriter<'a, W, BinaryEncoding_1_0> for &mut BinaryValueWr
             fn write_symbol<A: AsRawSymbolTokenRef>(self, value: A) -> IonResult<()>;
             fn write_clob<A: AsRef<[u8]>>(self, value: A) -> IonResult<()>;
             fn write_blob<A: AsRef<[u8]>>(self, value: A) -> IonResult<()>;
-            fn list_writer(self) -> IonResult<BinaryListWriter_1_0<'a>>;
-            fn sexp_writer(self) -> IonResult<BinarySExpWriter_1_0<'a>> ;
-            fn struct_writer(self) -> IonResult<BinaryStructWriter_1_0<'a>>;
+            fn list_writer(self) -> IonResult<BinaryListWriter_1_0<'value, 'top>>;
+            fn sexp_writer(self) -> IonResult<BinarySExpWriter_1_0<'value>> ;
+            fn struct_writer(self) -> IonResult<BinaryStructWriter_1_0<'value>>;
         }
     }
 }
 
-pub struct BinaryAnnotatedValueWriter_1_0<'a> {
-    value_writer: BinaryValueWriter_1_0<'a>,
+pub struct BinaryAnnotatedValueWriter_1_0<'value, 'top> {
+    value_writer: BinaryValueWriter_1_0<'value, 'top>,
 }
 
-impl<'a> BinaryAnnotatedValueWriter_1_0<'a> {
-    pub fn new(value_writer: BinaryValueWriter_1_0<'a>) -> Self {
+impl<'value, 'top> BinaryAnnotatedValueWriter_1_0<'value, 'top> {
+    pub fn new(value_writer: BinaryValueWriter_1_0<'value, 'top>) -> Self {
         Self { value_writer }
     }
 }
 
-impl<'a, W: Write> AnnotatedValueWriter<'a, W, BinaryEncoding_1_0>
-    for BinaryAnnotatedValueWriter_1_0<'a>
-{
-    type ValueWriter = BinaryValueWriter_1_0<'a>;
+impl<'value, 'top> AnnotatedValueWriter for BinaryAnnotatedValueWriter_1_0<'value, 'top> {
+    type ValueWriter = BinaryValueWriter_1_0<'value, 'top>;
 
-    fn write_annotations<
+    fn with_annotations<
         SymbolType: AsRawSymbolTokenRef,
         IterType: Iterator<Item = SymbolType> + Clone,
     >(
         self,
         _annotations: IterType,
-    ) -> IonResult<BinaryValueWriter_1_0<'a>> {
+    ) -> IonResult<BinaryValueWriter_1_0<'value, 'top>> {
         todo!("annotations in binary Ion 1.0")
     }
 
-    fn no_annotations(self) -> BinaryValueWriter_1_0<'a> {
-        self.value_writer
-    }
-}
-
-pub struct BinaryTopLevelValueWriter_1_0<'borrow, 'value_writer> {
-    value_writer: &'borrow mut BinaryValueWriter_1_0<'value_writer>,
-}
-
-impl<'borrow, 'value_writer> BinaryTopLevelValueWriter_1_0<'borrow, 'value_writer> {
-    pub fn new(value_writer: &'borrow mut BinaryValueWriter_1_0<'value_writer>) -> Self {
-        Self { value_writer }
-    }
-}
-
-impl<'borrow, 'value_writer, W: Write> AnnotatedValueWriter<'value_writer, W, BinaryEncoding_1_0>
-    for BinaryTopLevelValueWriter_1_0<'borrow, 'value_writer>
-{
-    type ValueWriter = &'borrow mut BinaryValueWriter_1_0<'value_writer>;
-
-    fn write_annotations<
-        SymbolType: AsRawSymbolTokenRef,
-        IterType: Iterator<Item = SymbolType> + Clone,
-    >(
-        self,
-        annotations: IterType,
-    ) -> IonResult<Self::ValueWriter> {
-        todo!("annotations in binary Ion 1.0")
-    }
-
-    fn no_annotations(self) -> Self::ValueWriter {
+    fn without_annotations(self) -> BinaryValueWriter_1_0<'value, 'top> {
         self.value_writer
     }
 }
@@ -373,6 +312,8 @@ impl<'borrow, 'value_writer, W: Write> AnnotatedValueWriter<'value_writer, W, Bi
 #[cfg(test)]
 mod tests {
     use crate::lazy::encoder::binary::LazyRawBinaryWriter_1_0;
+    use crate::lazy::encoder::write_as_ion::WriteAsIon;
+    use crate::lazy::encoder::{AnnotatedValueWriter, SequenceWriter, ValueWriter};
     use crate::{Element, IonData, IonResult, RawSymbolTokenRef, Timestamp};
 
     fn writer_test(
@@ -414,6 +355,44 @@ mod tests {
                 .write(Timestamp::with_ymd(2023, 11, 9).build()?)?
                 .write([0xE0u8, 0x01, 0x00, 0xEA])?;
             // .write([1, 2, 3])?;
+            Ok(())
+        };
+        writer_test(expected, test)
+    }
+
+    #[test]
+    fn write_list() -> IonResult<()> {
+        struct TestList;
+
+        impl WriteAsIon for TestList {
+            fn write_as_ion<V: AnnotatedValueWriter>(&self, writer: V) -> IonResult<()> {
+                let mut list = writer.without_annotations().list_writer()?;
+                list.write(1)?
+                    .write(false)?
+                    .write(3f32)?
+                    .write("foo")?
+                    .write(RawSymbolTokenRef::SymbolId(4))?
+                    .write(Timestamp::with_ymd(2023, 11, 9).build()?)?
+                    .write([0xE0u8, 0x01, 0x00, 0xEA])?;
+                list.end()?;
+                Ok(())
+            }
+        }
+
+        let expected = r#"
+            [
+                1,
+                false,
+                3e0,
+                "foo",
+                name,
+                2023-11-09T,
+                {{4AEA6g==}},
+                //[1, 2, 3],
+            ]
+        "#;
+        let test = |writer: &mut LazyRawBinaryWriter_1_0<&mut Vec<u8>>| {
+            writer.write(TestList)?;
             Ok(())
         };
         writer_test(expected, test)

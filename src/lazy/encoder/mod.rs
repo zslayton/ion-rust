@@ -28,57 +28,49 @@ pub trait LazyEncoder<W: Write>: 'static + Sized + Debug + Clone + Copy {
 
     /// A writer that serializes Rust values as Ion, emitting the resulting data to an implementation
     /// of [`Write`].
-    type Writer: LazyRawWriter<W, Self>;
+    type Writer: LazyRawWriter<W>;
 
-    /// A single-use type that can emit an Ion value.
+    // A single-use type that can emit an Ion value.
     // type ValueWriter<'a>: ValueWriter<'a, W, Self>
     // where
     //     W: 'a;
 
-    /// A single-use type that can emit a sequence of annotations and then return a [`ValueWriter`].
+    // A single-use type that can emit a sequence of annotations and then return a [`ValueWriter`].
     // type AnnotatedValueWriter<'a>: AnnotatedValueWriter<'a, W, Self>
     // where
     //     W: 'a;
 
-    /// Allows the application to write a (potentially heterogeneously typed) list without necessarily
-    /// having all of its child values in memory.
-    type ListWriter<'a>: SequenceWriter<'a, W, Self>
-    where
-        W: 'a;
-
-    // TODO: Apply trait constraints to the following associated types
-
-    type SExpWriter<'a>: SequenceWriter<'a, W, Self>
-    where
-        W: 'a;
-    type StructWriter<'a>: StructWriter<'a, W, Self>
-    where
-        W: 'a;
-    type EExpressionWriter<'a>;
+    // Allows the application to write a (potentially heterogeneously typed) list without necessarily
+    // having all of its child values in memory.
+    // type ListWriter<'a>: SequenceWriter<'a, W, Self>
+    // where
+    //     W: 'a;
+    //
+    // // TODO: Apply trait constraints to the following associated types
+    //
+    // type SExpWriter<'a>: SequenceWriter<'a, W, Self>
+    // where
+    //     W: 'a;
+    // type StructWriter<'a>: StructWriter<'a, W, Self>
+    // where
+    //     W: 'a;
+    // type EExpressionWriter<'a>;
 }
 
 impl<W: Write> LazyEncoder<W> for TextEncoding_1_0 {
     type Writer = LazyRawTextWriter_1_0<W>;
-    // type ValueWriter<'a> = TextValueWriter_1_0<'a, W> where W: 'a;
-    // type AnnotatedValueWriter<'a> = TextAnnotatedValueWriter_1_0<'a, W> where W: 'a;
-    type ListWriter<'a> = TextListWriter_1_0<'a, W> where W: 'a;
-    type SExpWriter<'a> = TextSExpWriter_1_0<'a, W> where W: 'a;
-    type StructWriter<'a> = TextStructWriter_1_0<'a, W> where W: 'a;
-
-    // TODO: Implement these associated types.
-    type EExpressionWriter<'a> = ();
 }
 
 /// One-shot methods that take a (possibly empty) sequence of annotations to encode and return a ValueWriter.
-pub trait AnnotatedValueWriter<'a, W: Write, E: LazyEncoder<W>> {
-    type ValueWriter: ValueWriter<'a, W, E>;
+pub trait AnnotatedValueWriter: Sized {
+    type ValueWriter: ValueWriter;
     /// Writes the provided annotations to the output stream and returns a [`ValueWriter`] that can
     /// be used to serialize the value itself.
     ///
-    /// If there are no annotations, use [`Self::no_annotations`] instead. This method will loop
-    /// over the empty sequence, incurring minor performance overhead while `no_annotations`
+    /// If there are no annotations, use [`Self::without_annotations`] instead. This method will loop
+    /// over the empty sequence, incurring minor performance overhead while `without_annotations`
     /// is a true no-op.
-    fn write_annotations<
+    fn with_annotations<
         SymbolType: AsRawSymbolTokenRef,
         IterType: Iterator<Item = SymbolType> + Clone,
     >(
@@ -87,10 +79,38 @@ pub trait AnnotatedValueWriter<'a, W: Write, E: LazyEncoder<W>> {
     ) -> IonResult<Self::ValueWriter>;
 
     /// Performs no operations and returns a [`ValueWriter`].
-    fn no_annotations(self) -> Self::ValueWriter;
+    fn without_annotations(self) -> Self::ValueWriter;
+
+    // Users can call `ValueWriter` methods on the `AnnotatedValueWriter` directly. Doing so
+    // will implicitly call `without_annotations`.
+    delegate! {
+        to self.without_annotations() {
+            fn write_null(self, ion_type: IonType) -> IonResult<()>;
+            fn write_bool(self, value: bool) -> IonResult<()>;
+            fn write_i64(self, value: i64) -> IonResult<()>;
+            fn write_int(self, value: &Int) -> IonResult<()>;
+            fn write_f32(self, value: f32) -> IonResult<()>;
+            fn write_f64(self, value: f64) -> IonResult<()>;
+            fn write_decimal(self, value: &Decimal) -> IonResult<()>;
+            fn write_timestamp(self, value: &Timestamp) -> IonResult<()>;
+            fn write_string<A: AsRef<str>>(self, value: A) -> IonResult<()>;
+            fn write_symbol<A: AsRawSymbolTokenRef>(self, value: A) -> IonResult<()>;
+            fn write_clob<A: AsRef<[u8]>>(self, value: A) -> IonResult<()>;
+            fn write_blob<A: AsRef<[u8]>>(self, value: A) -> IonResult<()>;
+            fn list_writer(self) -> IonResult<<Self::ValueWriter as ValueWriter>::ListWriter>;
+            fn sexp_writer(self) -> IonResult<<Self::ValueWriter as ValueWriter>::SExpWriter>;
+            fn struct_writer(self) -> IonResult<<Self::ValueWriter as ValueWriter>::StructWriter>;
+        }
+    }
 }
 
-pub trait ValueWriter<'a, W: Write, E: LazyEncoder<W>> {
+pub trait ValueWriter {
+    // Allows the application to write a (potentially heterogeneously typed) list without necessarily
+    // having all of its child values in memory.
+    type ListWriter: SequenceWriter;
+    type SExpWriter: SequenceWriter;
+    type StructWriter: StructWriter;
+
     fn write_null(self, ion_type: IonType) -> IonResult<()>;
     fn write_bool(self, value: bool) -> IonResult<()>;
     fn write_i64(self, value: i64) -> IonResult<()>;
@@ -103,20 +123,25 @@ pub trait ValueWriter<'a, W: Write, E: LazyEncoder<W>> {
     fn write_symbol<A: AsRawSymbolTokenRef>(self, value: A) -> IonResult<()>;
     fn write_clob<A: AsRef<[u8]>>(self, value: A) -> IonResult<()>;
     fn write_blob<A: AsRef<[u8]>>(self, value: A) -> IonResult<()>;
-    fn list_writer(self) -> IonResult<E::ListWriter<'a>>;
-    fn sexp_writer(self) -> IonResult<E::SExpWriter<'a>>;
-    fn struct_writer(self) -> IonResult<E::StructWriter<'a>>;
+    fn list_writer(self) -> IonResult<Self::ListWriter>;
+    fn sexp_writer(self) -> IonResult<Self::SExpWriter>;
+    fn struct_writer(self) -> IonResult<Self::StructWriter>;
 }
 
-pub trait LazyRawWriter<W: Write, E: LazyEncoder<W>> {
+pub trait LazyRawWriter<W: Write> {
+    type ValueWriter<'a>: ValueWriter
+    where
+        Self: 'a;
     fn new(output: W) -> IonResult<Self>
     where
         Self: Sized;
+
+    fn value_writer<'a>(&'a mut self) -> Self::ValueWriter<'a>;
     fn write<V: WriteAsIon>(&mut self, value: V) -> IonResult<&mut Self>;
     fn flush(&mut self) -> IonResult<()>;
 }
 
-pub trait StructWriter<'a, W: Write, E: LazyEncoder<W>> {
+pub trait StructWriter {
     /// Writes a struct field using the provided name/value pair.
     fn write<A: AsRawSymbolTokenRef, V: WriteAsIon>(
         &mut self,
@@ -128,7 +153,7 @@ pub trait StructWriter<'a, W: Write, E: LazyEncoder<W>> {
     fn end(self) -> IonResult<()>;
 }
 
-pub trait SequenceWriter<'a, W: Write, E: LazyEncoder<W>>: Sized {
+pub trait SequenceWriter {
     /// Writes a nested value within the list.
     fn write<V: WriteAsIon>(&mut self, value: V) -> IonResult<&mut Self>;
 
@@ -201,10 +226,17 @@ impl<W: Write> LazyRawTextWriter_1_0<W> {
     }
 }
 
-impl<W: Write> LazyRawWriter<W, TextEncoding_1_0> for LazyRawTextWriter_1_0<W> {
+impl<W: Write> LazyRawWriter<W> for LazyRawTextWriter_1_0<W> {
+    type ValueWriter<'a> = TextValueWriter_1_0<'a, W> where Self: 'a;
+
     fn new(output: W) -> IonResult<Self> {
         Ok(LazyRawTextWriter_1_0::new(output))
     }
+
+    fn value_writer(&mut self) -> Self::ValueWriter<'_> {
+        self.value_writer()
+    }
+
     // Delegate the trait methods to the inherent methods; this allows a version of these
     // methods to be called on the concrete type even when the trait is not in scope.
     delegate! {
@@ -234,12 +266,10 @@ pub struct TextAnnotatedValueWriter_1_0<'a, W: Write> {
     value_writer: TextValueWriter_1_0<'a, W>,
 }
 
-impl<'a, W: Write> AnnotatedValueWriter<'a, W, TextEncoding_1_0>
-    for TextAnnotatedValueWriter_1_0<'a, W>
-{
+impl<'a, W: Write> AnnotatedValueWriter for TextAnnotatedValueWriter_1_0<'a, W> {
     type ValueWriter = TextValueWriter_1_0<'a, W>;
 
-    fn write_annotations<
+    fn with_annotations<
         SymbolType: AsRawSymbolTokenRef,
         IterType: Iterator<Item = SymbolType> + Clone,
     >(
@@ -257,12 +287,16 @@ impl<'a, W: Write> AnnotatedValueWriter<'a, W, TextEncoding_1_0>
         Ok(self.value_writer)
     }
 
-    fn no_annotations(self) -> TextValueWriter_1_0<'a, W> {
+    fn without_annotations(self) -> TextValueWriter_1_0<'a, W> {
         self.value_writer
     }
 }
 
-impl<'a, W: Write> ValueWriter<'a, W, TextEncoding_1_0> for TextValueWriter_1_0<'a, W> {
+impl<'a, W: Write> ValueWriter for TextValueWriter_1_0<'a, W> {
+    type ListWriter = TextListWriter_1_0<'a, W>;
+    type SExpWriter = TextSExpWriter_1_0<'a, W>;
+    type StructWriter = TextStructWriter_1_0<'a, W>;
+
     fn write_null(mut self, ion_type: IonType) -> IonResult<()> {
         use IonType::*;
         let null_text = match ion_type {
@@ -370,15 +404,15 @@ impl<'a, W: Write> ValueWriter<'a, W, TextEncoding_1_0> for TextValueWriter_1_0<
         Ok(())
     }
 
-    fn list_writer(self) -> IonResult<<TextEncoding_1_0 as LazyEncoder<W>>::ListWriter<'a>> {
+    fn list_writer(self) -> IonResult<Self::ListWriter> {
         TextListWriter_1_0::new(self.writer, self.depth + 1)
     }
 
-    fn sexp_writer(self) -> IonResult<<TextEncoding_1_0 as LazyEncoder<W>>::SExpWriter<'a>> {
+    fn sexp_writer(self) -> IonResult<Self::SExpWriter> {
         TextSExpWriter_1_0::new(self.writer, self.depth + 1)
     }
 
-    fn struct_writer(self) -> IonResult<<TextEncoding_1_0 as LazyEncoder<W>>::StructWriter<'a>> {
+    fn struct_writer(self) -> IonResult<Self::StructWriter> {
         TextStructWriter_1_0::new(self.writer, self.depth + 1)
     }
 }
@@ -520,7 +554,7 @@ impl<'a, W: Write> TextListWriter_1_0<'a, W> {
     }
 }
 
-impl<'a, W: Write, E: LazyEncoder<W>> SequenceWriter<'a, W, E> for TextListWriter_1_0<'a, W> {
+impl<'a, W: Write> SequenceWriter for TextListWriter_1_0<'a, W> {
     delegate! {
         to self {
             fn write<V: WriteAsIon>(&mut self, value: V) -> IonResult<&mut Self>;
@@ -553,7 +587,7 @@ impl<'a, W: Write> TextSExpWriter_1_0<'a, W> {
     }
 }
 
-impl<'a, W: Write, E: LazyEncoder<W>> SequenceWriter<'a, W, E> for TextSExpWriter_1_0<'a, W> {
+impl<'a, W: Write> SequenceWriter for TextSExpWriter_1_0<'a, W> {
     delegate! {
         to self {
             fn write<V: WriteAsIon>(&mut self, value: V) -> IonResult<&mut Self>;
@@ -574,7 +608,7 @@ impl<'a, W: Write> TextStructWriter_1_0<'a, W> {
     }
 }
 
-impl<'a, W: Write> StructWriter<'a, W, TextEncoding_1_0> for TextStructWriter_1_0<'a, W> {
+impl<'a, W: Write> StructWriter for TextStructWriter_1_0<'a, W> {
     fn write<A: AsRawSymbolTokenRef, V: WriteAsIon>(
         &mut self,
         name: A,

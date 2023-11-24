@@ -1,8 +1,7 @@
 use crate::lazy::encoder::write_as_ion::{WriteAsIon, WriteAsIonValue};
-use crate::lazy::encoder::{AnnotatedValueWriter, LazyEncoder};
+use crate::lazy::encoder::AnnotatedValueWriter;
 use crate::raw_symbol_token_ref::AsRawSymbolTokenRef;
 use crate::IonResult;
-use std::io::Write;
 
 /// Associates a value to serialize with a sequence of annotations.
 pub struct Annotated<'a, T: ?Sized, A> {
@@ -63,11 +62,8 @@ where
     T: WriteAsIonValue,
     A: AsRawSymbolTokenRef,
 {
-    fn write_as_ion<'a, W: Write + 'a, E: LazyEncoder<W>, V: AnnotatedValueWriter<'a, W, E>>(
-        &self,
-        annotations_writer: V,
-    ) -> IonResult<()> {
-        let value_writer = annotations_writer.write_annotations(self.annotations.iter())?;
+    fn write_as_ion<V: AnnotatedValueWriter>(&self, annotations_writer: V) -> IonResult<()> {
+        let value_writer = annotations_writer.with_annotations(self.annotations.iter())?;
         self.value.write_as_ion_value(value_writer)
     }
 }
