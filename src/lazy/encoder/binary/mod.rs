@@ -22,6 +22,7 @@ mod value_writer;
 
 impl LazyEncoder for BinaryEncoding_1_0 {
     type Writer<W: Write> = LazyRawBinaryWriter_1_0<W>;
+    const SUPPORTS_TEXT_SYMBOL_TOKENS: bool = false;
 }
 
 /// A "raw"-level streaming binary Ion writer. This writer does not provide symbol table
@@ -136,6 +137,10 @@ impl<W: Write> LazyRawWriter<W> for LazyRawBinaryWriter_1_0<W> {
         to self {
             fn flush(&mut self) -> IonResult<()>;
         }
+    }
+
+    fn output(&mut self) -> &mut W {
+        &mut self.output
     }
 }
 

@@ -85,8 +85,13 @@ impl<W: Write> LazyRawWriter<W> for LazyRawTextWriter_1_0<W> {
             fn flush(&mut self) -> IonResult<()>;
         }
     }
+
+    fn output(&mut self) -> &mut W {
+        &mut self.output
+    }
 }
 
 impl LazyEncoder for TextEncoding_1_0 {
     type Writer<W: Write> = LazyRawTextWriter_1_0<W>;
+    const SUPPORTS_TEXT_SYMBOL_TOKENS: bool = true;
 }

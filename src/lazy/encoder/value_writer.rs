@@ -1,8 +1,10 @@
 use crate::lazy::encoder::value_writer::internal::MakeValueWriter;
 use crate::lazy::encoder::write_as_ion::WriteAsIon;
+use crate::lazy::encoder::LazyRawWriter;
 use crate::raw_symbol_token_ref::AsRawSymbolTokenRef;
 use crate::{Decimal, Int, IonResult, IonType, Timestamp};
 use delegate::delegate;
+use std::io::Write;
 
 pub(crate) mod internal {
     use crate::lazy::encoder::value_writer::AnnotatableValueWriter;
@@ -168,4 +170,22 @@ pub trait SequenceWriter: MakeValueWriter {
     //          self.value_writer().list_writer(...)
     //      as a workaround.
     // [1]: https://blog.rust-lang.org/2022/10/28/gats-stabilization.html#implied-static-requirement-from-higher-ranked-trait-bounds
+}
+
+impl<T> MakeValueWriter for &mut T
+where
+    T: MakeValueWriter,
+{
+    type ValueWriter<'a> = <T as MakeValueWriter>::ValueWriter<'a> where Self: 'a;
+
+    fn value_writer(&mut self) -> Self::ValueWriter<'_> {
+        <T as MakeValueWriter>::value_writer(self)
+    }
+}
+
+impl<T> SequenceWriter for &mut T
+where
+    T: SequenceWriter,
+{
+    // Uses default implementations
 }

@@ -18,7 +18,7 @@ use std::marker::PhantomData;
 
 use crate::lazy::encoder::value_writer::{AnnotatableValueWriter, SequenceWriter, ValueWriter};
 use crate::{
-    Blob, Clob, Decimal, Int, IonResult, Null, RawSymbolToken, RawSymbolTokenRef, Symbol,
+    Blob, Clob, Decimal, Int, IonResult, IonType, Null, RawSymbolToken, RawSymbolTokenRef, Symbol,
     SymbolRef, Timestamp,
 };
 
@@ -200,3 +200,15 @@ macro_rules! impl_write_as_ion_value_for_sexp_type_hint {
 impl_write_as_ion_value_for_sexp_type_hint!(Vec<T>, T);
 impl_write_as_ion_value_for_sexp_type_hint!(&[T], T);
 impl_write_as_ion_value_for_sexp_type_hint!([T; N], T, const N: usize);
+
+impl<T> WriteAsIonValue for Option<T>
+where
+    T: WriteAsIonValue,
+{
+    fn write_as_ion_value<V: ValueWriter>(&self, writer: V) -> IonResult<()> {
+        match self {
+            None => Null(IonType::Null).write_as_ion_value(writer),
+            Some(value) => value.write_as_ion_value(writer),
+        }
+    }
+}

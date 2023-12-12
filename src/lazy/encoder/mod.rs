@@ -1,13 +1,16 @@
 #![allow(non_camel_case_types)]
 
+use delegate::delegate;
 use std::fmt::Debug;
 use std::io::Write;
 
 use value_writer::SequenceWriter;
 
+use crate::lazy::encoder::value_writer::internal::MakeValueWriter;
 use crate::IonResult;
 
 pub mod annotate;
+pub mod application_writer;
 pub mod binary;
 pub mod text;
 pub mod value_writer;
@@ -28,6 +31,8 @@ pub trait LazyEncoder: 'static + Sized + Debug + Clone + Copy {
     /// A writer that serializes Rust values as Ion, emitting the resulting data to an implementation
     /// of [`Write`].
     type Writer<W: Write>: LazyRawWriter<W>;
+
+    const SUPPORTS_TEXT_SYMBOL_TOKENS: bool;
 }
 
 pub(crate) mod private {
@@ -41,6 +46,8 @@ pub trait LazyRawWriter<W: Write>: SequenceWriter {
     where
         Self: Sized;
     fn flush(&mut self) -> IonResult<()>;
+
+    fn output(&mut self) -> &mut W;
 }
 
 #[cfg(test)]
