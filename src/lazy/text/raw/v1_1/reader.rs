@@ -27,6 +27,7 @@ use bumpalo::Bump as BumpAllocator;
 pub struct LazyRawTextReader_1_1<'data> {
     input: &'data [u8],
     offset: usize,
+    is_eos: bool,
 }
 
 /// The index at which this macro can be found in the macro table.
@@ -101,6 +102,7 @@ impl<'data> LazyRawReader<'data, TextEncoding_1_1> for LazyRawTextReader_1_1<'da
         LazyRawTextReader_1_1 {
             input: data,
             offset: 0,
+            is_eos: false,
         }
     }
 
@@ -139,6 +141,35 @@ impl<'data> LazyRawReader<'data, TextEncoding_1_1> for LazyRawTextReader_1_1<'da
         // so a future call to `next()` will resume parsing the remaining input.
         self.offset = remaining.offset();
         Ok(matched_item)
+    }
+
+    fn new_with_offset(data: &'data [u8], offset: usize) -> Self {
+        LazyRawTextReader_1_1 {
+            input: data,
+            offset,
+            is_eos: false,
+        }
+    }
+
+    fn next_item_offset(&self) -> usize {
+        self.offset
+    }
+
+    fn read_from<R: std::io::Read>(&mut self, mut source: R, length: usize) -> IonResult<usize> {
+        let buffer = &mut self.input[self.offset..(self.offset + length)];
+        // Use that slice as our input buffer to read from the source.
+        let bytes_read = source.read(buffer)?;
+        // Update the offset with number of bytes read from source.
+        self.offset += bytes_read;
+        Ok(bytes_read)
+    }
+
+    fn stream_complete(&mut self) {
+        self.is_eos = true;
+    }
+
+    fn is_stream_complete(&self) -> bool {
+        self.is_eos
     }
 }
 

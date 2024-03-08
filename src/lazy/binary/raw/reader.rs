@@ -5,6 +5,7 @@ use crate::lazy::encoding::BinaryEncoding_1_0;
 use crate::lazy::raw_stream_item::{LazyRawStreamItem, RawStreamItem};
 use crate::result::IonFailure;
 use crate::IonResult;
+use std::io::Read;
 
 use bumpalo::Bump as BumpAllocator;
 
@@ -12,6 +13,7 @@ use bumpalo::Bump as BumpAllocator;
 /// in the provided input stream.
 pub struct LazyRawBinaryReader<'data> {
     data: DataSource<'data>,
+    is_eos: bool,
 }
 
 impl<'data> LazyRawBinaryReader<'data> {
@@ -26,7 +28,10 @@ impl<'data> LazyRawBinaryReader<'data> {
     /// position of values encountered in `data`.
     fn new_with_offset(data: &'data [u8], offset: usize) -> LazyRawBinaryReader<'data> {
         let data = DataSource::new(ImmutableBuffer::new_with_offset(data, offset));
-        LazyRawBinaryReader { data }
+        LazyRawBinaryReader {
+            data,
+            is_eos: false,
+        }
     }
 
     /// Helper method called by [`Self::next`]. Reads the current stream item as an Ion version
@@ -64,6 +69,10 @@ impl<'data> LazyRawBinaryReader<'data> {
         self.data.buffer = buffer;
         self.data.bytes_to_skip = lazy_value.encoded_value.total_length();
         Ok(RawStreamItem::Value(lazy_value))
+    }
+
+    pub fn read_from<R: Read>(&mut self, source: R, length: usize) -> IonResult<usize> {
+        self.data.read_from(source, length)
     }
 
     pub fn next<'top>(&'top mut self) -> IonResult<LazyRawStreamItem<'top, BinaryEncoding_1_0>>
@@ -110,6 +119,26 @@ impl<'data> LazyRawReader<'data, BinaryEncoding_1_0> for LazyRawBinaryReader<'da
     {
         self.next()
     }
+
+    fn new_with_offset(data: &'data [u8], offset: usize) -> Self {
+        LazyRawBinaryReader::new_with_offset(data, offset)
+    }
+
+    fn next_item_offset(&self) -> usize {
+        self.data.buffer.offset()
+    }
+
+    fn read_from<R: Read>(&mut self, source: R, length: usize) -> IonResult<usize> {
+        self.read_from(source, length)
+    }
+
+    fn stream_complete(&mut self) {
+        self.is_eos = true;
+    }
+
+    fn is_stream_complete(&self) -> bool {
+        self.is_eos
+    }
 }
 
 /// Wraps an [`ImmutableBuffer`], allowing the reader to advance each time an item is successfully
@@ -132,6 +161,10 @@ impl<'data> DataSource<'data> {
 
     pub(crate) fn buffer(&self) -> ImmutableBuffer<'data> {
         self.buffer
+    }
+
+    pub fn read_from<R: Read>(&mut self, source: R, length: usize) -> IonResult<usize> {
+        self.buffer.read_from(source, length)
     }
 
     fn advance_to_next_item(&mut self) -> IonResult<ImmutableBuffer<'data>> {

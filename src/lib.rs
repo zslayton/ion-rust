@@ -168,6 +168,8 @@ pub mod ion_hash;
 #[cfg(feature = "experimental-lazy-reader")]
 pub mod lazy;
 // Experimental Streaming APIs
+#[cfg(feature = "experimental-lazy-reader")]
+mod blocking_lazy_reader;
 mod position;
 #[cfg(feature = "experimental-serde")]
 pub mod serde;

@@ -1,10 +1,12 @@
 use std::fmt::Debug;
+use std::io::Read;
 
 use bumpalo::Bump as BumpAllocator;
 
 use crate::lazy::expanded::macro_evaluator::RawEExpression;
 use crate::lazy::raw_stream_item::LazyRawStreamItem;
 use crate::lazy::raw_value_ref::RawValueRef;
+use crate::lazy::text::raw::reader::LazyRawTextReader_1_0;
 use crate::result::IonFailure;
 use crate::{IonResult, IonType, RawSymbolTokenRef};
 
@@ -182,6 +184,15 @@ pub trait LazyRawReader<'data, D: LazyDecoder> {
     ) -> IonResult<LazyRawStreamItem<'top, D>>
     where
         'data: 'top;
+    fn new_with_offset(data: &'data [u8], offset: usize) -> Self;
+
+    fn next_item_offset(&self) -> usize;
+
+    fn read_from<R: Read>(&mut self, source: R, length: usize) -> IonResult<usize>;
+
+    fn stream_complete(&mut self);
+
+    fn is_stream_complete(&self) -> bool;
 }
 
 pub trait LazyRawValue<'top, D: LazyDecoder>:

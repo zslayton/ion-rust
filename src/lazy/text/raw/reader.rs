@@ -1,4 +1,5 @@
 #![allow(non_camel_case_types)]
+
 use crate::lazy::decoder::LazyRawReader;
 use crate::lazy::encoding::TextEncoding_1_0;
 use crate::lazy::never::Never;
@@ -9,12 +10,14 @@ use crate::lazy::text::value::LazyRawTextValue_1_0;
 use crate::result::IonFailure;
 use crate::IonResult;
 use bumpalo::Bump as BumpAllocator;
+use std::io::Read;
 
 /// A text Ion 1.0 reader that yields [`LazyRawStreamItem`]s representing the top level values found
 /// in the provided input stream.
 pub struct LazyRawTextReader_1_0<'data> {
     input: &'data [u8],
     offset: usize,
+    is_eos: bool,
 }
 
 impl<'data> LazyRawTextReader_1_0<'data> {
@@ -31,7 +34,17 @@ impl<'data> LazyRawTextReader_1_0<'data> {
         LazyRawTextReader_1_0 {
             input: data,
             offset,
+            is_eos: false,
         }
+    }
+
+    pub fn read_from<R: Read>(&mut self, mut source: R, length: usize) -> IonResult<usize> {
+        let buffer = &mut self.input[self.offset..(self.offset + length)];
+        // Use that slice as our input buffer to read from the source.
+        let bytes_read = source.read(buffer)?;
+        // Update the offset with number of bytes read from source.
+        self.offset += bytes_read;
+        Ok(bytes_read)
     }
 
     pub fn next<'top>(
@@ -86,6 +99,26 @@ impl<'data> LazyRawReader<'data, TextEncoding_1_0> for LazyRawTextReader_1_0<'da
         'data: 'top,
     {
         self.next(allocator)
+    }
+
+    fn new_with_offset(data: &'data [u8], offset: usize) -> Self {
+        LazyRawTextReader_1_0::new_with_offset(data, offset)
+    }
+
+    fn next_item_offset(&self) -> usize {
+        self.offset
+    }
+
+    fn read_from<R: std::io::Read>(&mut self, source: R, length: usize) -> IonResult<usize> {
+        self.read_from(source, length)
+    }
+
+    fn stream_complete(&mut self) {
+        self.is_eos = true;
+    }
+
+    fn is_stream_complete(&self) -> bool {
+        self.is_eos
     }
 }
 

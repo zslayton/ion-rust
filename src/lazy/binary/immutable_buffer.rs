@@ -15,6 +15,7 @@ use crate::types::UInt;
 use crate::{Int, IonError, IonResult, IonType};
 use num_bigint::{BigInt, BigUint, Sign};
 use std::fmt::{Debug, Formatter};
+use std::io::Read;
 use std::mem;
 
 // This limit is used for stack-allocating buffer space to encode/decode UInts.
@@ -89,6 +90,15 @@ impl<'a> ImmutableBuffer<'a> {
             data: self.bytes_range(offset, length),
             offset: self.offset + offset,
         }
+    }
+
+    pub fn read_from<R: Read>(&mut self, mut source: R, length: usize) -> IonResult<usize> {
+        let buffer = &mut self.data[self.offset..(self.offset + length)];
+        // Use that slice as our input buffer to read from the source.
+        let bytes_read = source.read(buffer)?;
+        // Update the offset with number of bytes read from source.
+        self.offset += bytes_read;
+        Ok(bytes_read)
     }
 
     /// Returns the number of bytes between the start of the original input byte array and the

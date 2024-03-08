@@ -178,6 +178,42 @@ impl<'data> LazyRawReader<'data, AnyEncoding> for LazyRawAnyReader<'data> {
             RawReaderKind::Binary_1_0(r) => Ok(r.next()?.into()),
         }
     }
+
+    fn new_with_offset(data: &'data [u8], offset: usize) -> Self {
+        if data.starts_with(&[0xE0u8, 0x01, 0x00, 0xEA]) {
+            LazyRawBinaryReader::new_with_offset(data, offset).into()
+        } else {
+            LazyRawTextReader_1_0::new_with_offset(data, offset).into()
+        }
+    }
+
+    fn next_item_offset(&self) -> usize {
+        match &self.encoding {
+            RawReaderKind::Text_1_0(r) => r.next_item_offset(),
+            RawReaderKind::Binary_1_0(r) => r.next_item_offset(),
+        }
+    }
+
+    fn read_from<R: std::io::Read>(&mut self, source: R, length: usize) -> IonResult<usize> {
+        match self.encoding {
+            RawReaderKind::Text_1_0(ref mut r) => r.read_from(source, length),
+            RawReaderKind::Binary_1_0(ref mut r) => r.read_from(source, length),
+        }
+    }
+
+    fn stream_complete(&mut self) {
+        match self.encoding {
+            RawReaderKind::Text_1_0(ref mut r) => r.stream_complete(),
+            RawReaderKind::Binary_1_0(ref mut r) => r.stream_complete(),
+        }
+    }
+
+    fn is_stream_complete(&self) -> bool {
+        match &self.encoding {
+            RawReaderKind::Text_1_0(r) => r.is_stream_complete(),
+            RawReaderKind::Binary_1_0(r) => r.is_stream_complete(),
+        }
+    }
 }
 
 // ===== Values ======
