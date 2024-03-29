@@ -1,3 +1,4 @@
+use crate::lazy::encoder::foo::ContainerFn;
 use crate::lazy::encoder::private::Sealed;
 use crate::lazy::encoder::text::LazyRawTextWriter_1_0;
 use crate::lazy::encoder::value_writer::internal::MakeValueWriter;
@@ -331,7 +332,7 @@ impl<'a, W: Write> StructWriter for TextStructWriter_1_0<'a, W> {
 impl<'value, W: Write + 'value, SymbolType: AsRawSymbolTokenRef> ValueWriter
     for TextAnnotatedValueWriter_1_0<'value, W, SymbolType>
 {
-    type ListWriter<'a> = TextListWriter_1_0<'value, W>;
+    type ListWriter = TextListWriter_1_0<'value, W>;
     type SExpWriter<'a> = TextSExpWriter_1_0<'value, W>;
     type StructWriter<'a> = TextStructWriter_1_0<'value, W>;
 
@@ -342,7 +343,7 @@ impl<'value, W: Write + 'value, SymbolType: AsRawSymbolTokenRef> ValueWriter
 }
 
 impl<'value, W: Write> ValueWriter for TextValueWriter_1_0<'value, W> {
-    type ListWriter<'a> = TextListWriter_1_0<'value, W>;
+    type ListWriter = TextListWriter_1_0<'value, W>;
     type SExpWriter<'a> = TextSExpWriter_1_0<'value, W>;
     type StructWriter<'a> = TextStructWriter_1_0<'value, W>;
 
@@ -467,12 +468,10 @@ impl<'value, W: Write> ValueWriter for TextValueWriter_1_0<'value, W> {
         Ok(())
     }
 
-    fn write_list<F: for<'a> FnOnce(&mut Self::ListWriter<'a>) -> IonResult<()>>(
-        self,
-        list_fn: F,
-    ) -> IonResult<()> {
+    // fn write_list(self, list_fn: impl for<'a> ContainerFn<Self::ListWriter>) -> IonResult<()> {
+    fn write_list(self, list_fn: impl ContainerFn<Self::ListWriter>) -> IonResult<()> {
         let mut list_writer = TextListWriter_1_0::new(self.writer, self.depth + 1)?;
-        list_fn(&mut list_writer)?;
+        list_fn.populate(&mut list_writer)?;
         list_writer.end()
     }
     fn write_sexp<F: for<'a> FnOnce(&mut Self::SExpWriter<'a>) -> IonResult<()>>(

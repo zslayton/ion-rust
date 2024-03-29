@@ -6,7 +6,7 @@ use ice_code::ice as cold_path;
 use num_bigint::BigInt;
 use num_traits::ToPrimitive;
 
-use crate::lazy::encoder::binary::annotate_and_delegate;
+use crate::lazy::encoder::binary::annotate_and_delegate_1_1;
 use crate::lazy::encoder::binary::v1_1::container_writers::{
     BinaryContainerWriter_1_1, BinaryListWriter_1_1, BinaryMacroArgsWriter_1_1,
     BinarySExpWriter_1_1, BinaryStructWriter_1_1,
@@ -14,9 +14,11 @@ use crate::lazy::encoder::binary::v1_1::container_writers::{
 use crate::lazy::encoder::binary::v1_1::fixed_int::FixedInt;
 use crate::lazy::encoder::binary::v1_1::fixed_uint::FixedUInt;
 use crate::lazy::encoder::binary::v1_1::flex_sym::FlexSym;
+use crate::lazy::encoder::foo::ContainerFn;
 use crate::lazy::encoder::private::Sealed;
+use crate::lazy::encoder::value_writer::internal::MakeValueWriter;
 use crate::lazy::encoder::value_writer::{
-    delegate_value_writer_to_self, AnnotatableValueWriter, ValueWriter,
+    delegate_value_writer_to_self, AnnotatableValueWriter, SequenceWriter, ValueWriter,
 };
 use crate::lazy::text::raw::v1_1::reader::MacroIdRef;
 use crate::raw_symbol_token_ref::AsRawSymbolTokenRef;
@@ -578,11 +580,9 @@ impl<'value, 'top> BinaryValueWriter_1_1<'value, 'top> {
         Ok(())
     }
 
-    pub fn write_list<
-        F: for<'a> FnOnce(&mut <Self as ValueWriter>::ListWriter<'a>) -> IonResult<()>,
-    >(
+    fn write_list(
         self,
-        list_fn: F,
+        list_fn: impl ContainerFn<<Self as ValueWriter>::ListWriter>,
     ) -> IonResult<()> {
         if self.delimited_containers {
             return self.write_delimited_list(list_fn);
@@ -590,11 +590,9 @@ impl<'value, 'top> BinaryValueWriter_1_1<'value, 'top> {
         self.write_length_prefixed_list(list_fn)
     }
 
-    pub fn write_length_prefixed_list<
-        F: for<'a> FnOnce(&mut <Self as ValueWriter>::ListWriter<'a>) -> IonResult<()>,
-    >(
+    fn write_length_prefixed_list(
         mut self,
-        list_fn: F,
+        list_fn: impl ContainerFn<<Self as ValueWriter>::ListWriter>,
     ) -> IonResult<()> {
         // We're writing a length-prefixed list, so we need to set up a space to encode the list's children.
         let child_encoding_buffer = self.allocator.alloc_with(|| {
@@ -605,7 +603,7 @@ impl<'value, 'top> BinaryValueWriter_1_1<'value, 'top> {
             BinaryContainerWriter_1_1::new(self.allocator, child_encoding_buffer);
         let mut list_writer = BinaryListWriter_1_1::new(container_writer);
         // Pass it to the closure, allowing the user to encode child values.
-        list_fn(&mut list_writer)?;
+        list_fn.populate(&mut list_writer)?;
         // Write the appropriate opcode for a list of this length
         let encoded_length = list_writer.container_writer.buffer().len();
         match encoded_length {
@@ -623,18 +621,16 @@ impl<'value, 'top> BinaryValueWriter_1_1<'value, 'top> {
         Ok(())
     }
 
-    fn write_delimited_list<
-        F: for<'a> FnOnce(&mut <Self as ValueWriter>::ListWriter<'a>) -> IonResult<()>,
-    >(
-        self,
-        list_fn: F,
+    fn write_delimited_list(
+        mut self,
+        list_fn: impl ContainerFn<<Self as ValueWriter>::ListWriter>,
     ) -> IonResult<()> {
         let child_encoding_buffer = self.encoding_buffer;
         let container_writer =
             BinaryContainerWriter_1_1::new(self.allocator, child_encoding_buffer);
         let list_writer = &mut BinaryListWriter_1_1::new(container_writer);
         list_writer.container_writer.buffer().push(0xF1); // Start delimited list
-        list_fn(list_writer)?;
+        list_fn.populate(list_writer)?;
         list_writer.container_writer.buffer().push(0xF0); // End delimited container
         Ok(())
     }
@@ -792,7 +788,7 @@ impl<'value, 'top> BinaryValueWriter_1_1<'value, 'top> {
 impl<'value, 'top> Sealed for BinaryValueWriter_1_1<'value, 'top> {}
 
 impl<'value, 'top> ValueWriter for BinaryValueWriter_1_1<'value, 'top> {
-    type ListWriter<'a> = BinaryListWriter_1_1<'value, 'top>;
+    type ListWriter = BinaryListWriter_1_1<'value, 'top>;
     type SExpWriter<'a> = BinarySExpWriter_1_1<'value, 'top>;
     type StructWriter<'a> = BinaryStructWriter_1_1<'value, 'top>;
 
@@ -860,36 +856,36 @@ pub struct BinaryAnnotatedValueWriter_1_1<'value, 'top, SymbolType: AsRawSymbolT
 impl<'value, 'top, SymbolType: AsRawSymbolTokenRef>
     BinaryAnnotatedValueWriter_1_1<'value, 'top, SymbolType>
 {
-    fn encode_annotated<F>(mut self, encode_value_fn: F) -> IonResult<()>
-    where
-        F: for<'a> FnOnce(BinaryValueWriter_1_1<'value, 'top>) -> IonResult<()>,
-    {
-        // TODO: With some extra analysis, we could determine whether FlexUInt annotation encodings
-        //       were sufficient. These are potentially slightly more compact, but cannot encode
-        //       inline text or `$0`. For now, we simply use FlexSym encoding.
-        match self.annotations {
-            [] => {
-                // There are no annotations; nothing to do.
-            }
-            [a] => {
-                // Opcode 0xE7: A single FlexSym annotation follows
-                self.buffer.push(0xE7);
-                FlexSym::encode_symbol(self.buffer, a);
-            }
-            [a1, a2] => {
-                // Opcode 0xE8: Two FlexSym annotations follow
-                self.buffer.push(0xE8);
-                FlexSym::encode_symbol(self.buffer, a1);
-                FlexSym::encode_symbol(self.buffer, a2);
-            }
-            _ => {
-                self.write_length_prefixed_flex_sym_annotation_sequence();
-            }
-        }
-        // We've encoded the annotations, now create a no-annotations ValueWriter to encode the value itself.
-        let value_writer = BinaryValueWriter_1_1::new(self.allocator, self.buffer);
-        encode_value_fn(value_writer)
-    }
+    // fn encode_annotated<F>(mut self, encode_value_fn: F) -> IonResult<()>
+    // where
+    //     F: for<'a> FnOnce(BinaryValueWriter_1_1<'value, 'top>) -> IonResult<()>,
+    // {
+    //     // TODO: With some extra analysis, we could determine whether FlexUInt annotation encodings
+    //     //       were sufficient. These are potentially slightly more compact, but cannot encode
+    //     //       inline text or `$0`. For now, we simply use FlexSym encoding.
+    //     match self.annotations {
+    //         [] => {
+    //             // There are no annotations; nothing to do.
+    //         }
+    //         [a] => {
+    //             // Opcode 0xE7: A single FlexSym annotation follows
+    //             self.buffer.push(0xE7);
+    //             FlexSym::encode_symbol(self.buffer, a);
+    //         }
+    //         [a1, a2] => {
+    //             // Opcode 0xE8: Two FlexSym annotations follow
+    //             self.buffer.push(0xE8);
+    //             FlexSym::encode_symbol(self.buffer, a1);
+    //             FlexSym::encode_symbol(self.buffer, a2);
+    //         }
+    //         _ => {
+    //             self.write_length_prefixed_flex_sym_annotation_sequence();
+    //         }
+    //     }
+    //     // We've encoded the annotations, now create a no-annotations ValueWriter to encode the value itself.
+    //     let value_writer = BinaryValueWriter_1_1::new(self.allocator, self.buffer);
+    //     encode_value_fn(value_writer)
+    // }
 
     fn write_flex_sym_annotation(
         buffer: &mut BumpVec<'top, u8>,
@@ -922,12 +918,12 @@ impl<'value, 'top, SymbolType: AsRawSymbolTokenRef> Sealed
 impl<'value, 'top, SymbolType: AsRawSymbolTokenRef> ValueWriter
     for BinaryAnnotatedValueWriter_1_1<'value, 'top, SymbolType>
 {
-    type ListWriter<'a> = BinaryListWriter_1_1<'value, 'top>;
+    type ListWriter = BinaryListWriter_1_1<'value, 'top>;
     type SExpWriter<'a> = BinarySExpWriter_1_1<'value, 'top>;
     type StructWriter<'a> = BinaryStructWriter_1_1<'value, 'top>;
     type MacroArgsWriter<'a> = BinaryMacroArgsWriter_1_1<'value, 'top>;
 
-    annotate_and_delegate!(
+    annotate_and_delegate_1_1!(
         IonType => write_null,
         bool => write_bool,
         i64 => write_i64,
@@ -942,30 +938,32 @@ impl<'value, 'top, SymbolType: AsRawSymbolTokenRef> ValueWriter
         impl AsRef<[u8]> => write_blob,
     );
 
-    fn write_list<F: for<'a> FnOnce(&mut Self::ListWriter<'a>) -> IonResult<()>>(
-        self,
-        list_fn: F,
-    ) -> IonResult<()> {
-        self.encode_annotated(|value_writer| value_writer.write_list(list_fn))
+    // fn write_list(self, list_fn: impl for<'a> WriteSequenceFn<Self::ListWriter>) -> IonResult<()> {
+    fn write_list(self, list_fn: impl ContainerFn<Self::ListWriter>) -> IonResult<()> {
+        todo!()
+        // self.encode_annotated(|value_writer| value_writer.write_list(list_fn))
     }
     fn write_sexp<F: for<'a> FnOnce(&mut Self::SExpWriter<'a>) -> IonResult<()>>(
         self,
         sexp_fn: F,
     ) -> IonResult<()> {
-        self.encode_annotated(|value_writer| value_writer.write_sexp(sexp_fn))
+        todo!()
+        // self.encode_annotated(|value_writer| value_writer.write_sexp(sexp_fn))
     }
     fn write_struct<F: for<'a> FnOnce(&mut Self::StructWriter<'a>) -> IonResult<()>>(
         self,
         struct_fn: F,
     ) -> IonResult<()> {
-        self.encode_annotated(|value_writer| value_writer.write_struct(struct_fn))
+        todo!()
+        // self.encode_annotated(|value_writer| value_writer.write_struct(struct_fn))
     }
     fn write_eexp<'macro_id, F: for<'a> FnOnce(&mut Self::MacroArgsWriter<'a>) -> IonResult<()>>(
         self,
         macro_id: impl Into<MacroIdRef<'macro_id>>,
         macro_fn: F,
     ) -> IonResult<()> {
-        self.encode_annotated(|value_writer| value_writer.write_eexp(macro_id, macro_fn))
+        todo!()
+        // self.encode_annotated(|value_writer| value_writer.write_eexp(macro_id, macro_fn))
     }
 }
 

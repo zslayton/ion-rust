@@ -22,19 +22,19 @@ pub struct BinaryContainerWriter_1_0<'value, 'top> {
     // The buffer containing the parent's encoded body. When this list writer is finished encoding
     // its own data, a header will be written to the parent and then the list body will be copied
     // over.
-    parent_buffer: &'value mut BumpVec<'top, u8>,
+    buffer: &'value mut BumpVec<'top, u8>,
 }
 
 impl<'value, 'top> BinaryContainerWriter_1_0<'value, 'top> {
     pub fn new(
         type_code: u8,
         allocator: &'top BumpAllocator,
-        parent_buffer: &'value mut BumpVec<'top, u8>,
+        buffer: &'value mut BumpVec<'top, u8>,
     ) -> Self {
         Self {
             type_code,
             allocator,
-            parent_buffer,
+            buffer,
         }
     }
 
@@ -52,13 +52,16 @@ impl<'value, 'top> BinaryContainerWriter_1_0<'value, 'top> {
         let body_length = body.len();
         if body_length <= MAX_INLINE_LENGTH {
             let type_descriptor = self.type_code | (body_length as u8);
-            self.parent_buffer.push(type_descriptor);
+            self.buffer.push(type_descriptor);
         } else {
-            self.parent_buffer.push(self.type_code | 0xE);
-            VarUInt::write_u64(&mut self.parent_buffer, body_length as u64)?;
+            self.buffer.push(self.type_code | 0xE);
+            VarUInt::write_u64(&mut self.buffer, body_length as u64)?;
         }
-        self.parent_buffer.extend_from_slice_copy(body);
+        self.buffer.extend_from_slice_copy(body);
         Ok(())
+    }
+    pub fn buffer(&self) -> &[u8] {
+        self.buffer.as_slice()
     }
 }
 
@@ -120,7 +123,7 @@ impl<'value> SequenceWriter for BinaryListValuesWriter_1_0<'value> {
 }
 
 pub struct BinaryListWriter_1_0<'value, 'top> {
-    container_writer: BinaryContainerWriter_1_0<'value, 'top>,
+    pub(crate) container_writer: BinaryContainerWriter_1_0<'value, 'top>,
 }
 
 impl<'value, 'top> BinaryListWriter_1_0<'value, 'top> {
@@ -128,19 +131,38 @@ impl<'value, 'top> BinaryListWriter_1_0<'value, 'top> {
         Self { container_writer }
     }
 
-    pub fn write_values<'a, F>(self, write_fn: F) -> IonResult<()>
-    where
-        'top: 'a,
-        F: FnOnce(&mut BinaryListValuesWriter_1_0<'a>) -> IonResult<()>,
-    {
-        self.container_writer
-            .write_values(|container_values_writer| {
-                let mut list_values_writer =
-                    BinaryListValuesWriter_1_0::new(container_values_writer);
-                write_fn(&mut list_values_writer)?;
-                Ok(list_values_writer.values_writer.buffer)
-            })
+    pub fn buffer(&self) -> &[u8] {
+        self.container_writer.buffer()
     }
+
+    // pub fn write_values<'a, F>(self, write_fn: F) -> IonResult<()>
+    // where
+    //     'top: 'a,
+    //     F: FnOnce(&mut BinaryListValuesWriter_1_0<'a>) -> IonResult<()>,
+    // {
+    //     self.container_writer
+    //         .write_values(|container_values_writer| {
+    //             let mut list_values_writer =
+    //                 BinaryListValuesWriter_1_0::new(container_values_writer);
+    //             write_fn(&mut list_values_writer)?;
+    //             Ok(list_values_writer.values_writer.buffer)
+    //         })
+    // }
+}
+
+impl<'value, 'top> MakeValueWriter for BinaryListWriter_1_0<'value, 'top> {
+    type ValueWriter<'a> = BinaryAnnotatableValueWriter_1_0<'a, 'top> where Self: 'a;
+
+    fn make_value_writer(&mut self) -> Self::ValueWriter<'_> {
+        BinaryAnnotatableValueWriter_1_0::new(
+            self.container_writer.allocator,
+            &mut self.container_writer.buffer,
+        )
+    }
+}
+
+impl<'value, 'top> SequenceWriter for BinaryListWriter_1_0<'value, 'top> {
+    // All default methods
 }
 
 pub struct BinarySExpValuesWriter_1_0<'value> {

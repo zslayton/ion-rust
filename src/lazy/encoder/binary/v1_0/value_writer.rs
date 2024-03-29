@@ -12,12 +12,12 @@ use crate::binary::timestamp::TimestampBinaryEncoder;
 use crate::binary::uint;
 use crate::binary::uint::DecodedUInt;
 use crate::binary::var_uint::VarUInt;
-use crate::lazy::encoder::binary::annotate_and_delegate;
+use crate::lazy::encoder::binary::annotate_and_delegate_1_0;
 use crate::lazy::encoder::binary::v1_0::container_writers::{
-    BinaryContainerWriter_1_0, BinaryListValuesWriter_1_0, BinaryListWriter_1_0,
-    BinarySExpValuesWriter_1_0, BinarySExpWriter_1_0, BinaryStructFieldsWriter_1_0,
-    BinaryStructWriter_1_0,
+    BinaryContainerWriter_1_0, BinaryListWriter_1_0, BinarySExpValuesWriter_1_0,
+    BinarySExpWriter_1_0, BinaryStructFieldsWriter_1_0, BinaryStructWriter_1_0,
 };
+use crate::lazy::encoder::foo::ContainerFn;
 use crate::lazy::encoder::private::Sealed;
 use crate::lazy::encoder::value_writer::{
     delegate_value_writer_to, delegate_value_writer_to_self, AnnotatableValueWriter, ValueWriter,
@@ -27,11 +27,19 @@ use crate::lazy::text::raw::v1_1::reader::MacroIdRef;
 use crate::raw_symbol_token_ref::AsRawSymbolTokenRef;
 use crate::result::{EncodingError, IonFailure};
 use crate::types::integer::IntData;
-use crate::{Decimal, Int, IonError, IonResult, IonType, RawSymbolTokenRef, SymbolId, Timestamp};
+use crate::{
+    Decimal, FlexUInt, Int, IonError, IonResult, IonType, RawSymbolTokenRef, SymbolId, Timestamp,
+};
 
 /// The largest possible 'L' (length) value that can be written directly in a type descriptor byte.
 /// Larger length values will need to be written as a VarUInt following the type descriptor.
 pub(crate) const MAX_INLINE_LENGTH: usize = 13;
+
+/// The initial size of the bump-allocated buffer created to hold a container's child elements.
+// This number was chosen somewhat arbitrarily and can be updated as needed.
+// TODO: Writers could track the largest container size they've seen and use that as their initial
+//       size to minimize reallocations.
+const DEFAULT_CONTAINER_BUFFER_SIZE: usize = 512;
 
 pub struct BinaryValueWriter_1_0<'value, 'top> {
     allocator: &'top BumpAllocator,
@@ -249,14 +257,14 @@ impl<'value, 'top> BinaryValueWriter_1_0<'value, 'top> {
         self.write_lob(bytes, 0xA0)
     }
 
-    fn list_writer(&mut self) -> BinaryListWriter_1_0<'_, 'top> {
-        const LIST_TYPE_CODE: u8 = 0xB0;
-        BinaryListWriter_1_0::new(BinaryContainerWriter_1_0::new(
-            LIST_TYPE_CODE,
-            self.allocator,
-            self.encoding_buffer,
-        ))
-    }
+    // fn list_writer(&mut self) -> BinaryListWriter_1_0<'_, 'top> {
+    //     const LIST_TYPE_CODE: u8 = 0xB0;
+    //     BinaryListWriter_1_0::new(BinaryContainerWriter_1_0::new(
+    //         LIST_TYPE_CODE,
+    //         self.allocator,
+    //         self.encoding_buffer,
+    //     ))
+    // }
 
     fn sexp_writer(&mut self) -> BinarySExpWriter_1_0<'_, 'top> {
         const SEXP_TYPE_CODE: u8 = 0xC0;
@@ -276,13 +284,43 @@ impl<'value, 'top> BinaryValueWriter_1_0<'value, 'top> {
         ))
     }
 
-    fn write_list<
-        F: for<'a> FnOnce(&mut <Self as ValueWriter>::ListWriter<'a>) -> IonResult<()>,
-    >(
+    // fn write_list<F: for<'a> ContainerFn<<Self as ValueWriter>::ListWriter>>(
+    //     mut self,
+    //     list_fn: F,
+    // ) -> IonResult<()> {
+    fn write_list(
         mut self,
-        list_fn: F,
+        list_fn: impl ContainerFn<<Self as ValueWriter>::ListWriter>,
     ) -> IonResult<()> {
-        self.list_writer().write_values(list_fn)
+        const LIST_TYPE_CODE: u8 = 0xB0;
+        let child_encoding_buffer = self.allocator.alloc_with(|| {
+            BumpVec::with_capacity_in(DEFAULT_CONTAINER_BUFFER_SIZE, self.allocator)
+        });
+        // Create a BinaryListWriter_1_0 to pass to the user's closure.
+        let mut list_writer = BinaryListWriter_1_0::new(BinaryContainerWriter_1_0::new(
+            LIST_TYPE_CODE,
+            self.allocator,
+            child_encoding_buffer,
+        ));
+        // Pass it to the closure, allowing the user to encode child values.
+        list_fn.populate(&mut list_writer)?;
+        // Write the appropriate opcode for a list of this length.
+        let encoded_length = list_writer.buffer().len();
+        match encoded_length {
+            0..=15 => {
+                let opcode = 0xA0 | encoded_length as u8;
+                self.push_byte(opcode);
+            }
+            _ => {
+                let opcode = 0xFA; // List w/FlexUInt length
+                self.push_byte(opcode);
+                FlexUInt::write_u64(self.encoding_buffer, encoded_length as u64)?;
+            }
+        }
+        self.push_bytes(list_writer.buffer());
+        Ok(())
+        // self.list_writer()
+        //     .write_values(|list_writer| list_fn.write_seq(list_writer))
     }
     fn write_sexp<
         F: for<'a> FnOnce(&mut <Self as ValueWriter>::SExpWriter<'a>) -> IonResult<()>,
@@ -318,7 +356,7 @@ impl<'value, 'top> BinaryValueWriter_1_0<'value, 'top> {
 impl<'value, 'top> Sealed for BinaryValueWriter_1_0<'value, 'top> {}
 
 impl<'value, 'top> ValueWriter for BinaryValueWriter_1_0<'value, 'top> {
-    type ListWriter<'a> = BinaryListValuesWriter_1_0<'a>;
+    type ListWriter = BinaryListWriter_1_0<'value, 'top>;
     type SExpWriter<'a> = BinarySExpValuesWriter_1_0<'a>;
     type StructWriter<'a> = BinaryStructFieldsWriter_1_0<'a>;
 
@@ -391,21 +429,22 @@ impl<'value, 'top, SymbolType: AsRawSymbolTokenRef>
 impl<'value, 'top, SymbolType: AsRawSymbolTokenRef>
     BinaryAnnotationsWrapperWriter<'value, 'top, SymbolType>
 {
-    fn encode_annotated<F>(self, encode_value_fn: F) -> IonResult<()>
-    where
-        F: for<'a> FnOnce(BinaryAnnotatedValueWriter_1_0<'a, 'top>) -> IonResult<()>,
-    {
-        let allocator = self.allocator;
-        let buffer = allocator.alloc_with(|| BumpVec::new_in(allocator));
-        {
-            let annotated_value_writer =
-                BinaryAnnotatedValueWriter_1_0::new(self.allocator, buffer);
-            encode_value_fn(annotated_value_writer)?;
-        }
-        self.annotate_encoded_value(buffer.as_slice())
-    }
+    // fn encode_annotated<V, F>(self, encode_value_fn: F) -> IonResult<()>
+    // where
+    //     V: ValueWriter,
+    //     F: FnOnce(V) -> IonResult<()>,
+    // {
+    //     let allocator = self.allocator;
+    //     let buffer = allocator.alloc_with(|| BumpVec::new_in(allocator));
+    //     {
+    //         let annotated_value_writer =
+    //             BinaryAnnotatedValueWriter_1_0::new(self.allocator, buffer);
+    //         encode_value_fn(annotated_value_writer)?;
+    //     }
+    //     self.annotate_encoded_value(buffer.as_slice())
+    // }
 
-    fn annotate_encoded_value(self, encoded_value: &[u8]) -> IonResult<()> {
+    pub(crate) fn annotate_encoded_value(self, encoded_value: &[u8]) -> IonResult<()> {
         let mut encoded_annotations_sequence = BumpVec::new_in(self.allocator);
         self.encode_annotations_sequence(&mut encoded_annotations_sequence)?;
 
@@ -457,7 +496,7 @@ impl<'value, 'top, SymbolType: AsRawSymbolTokenRef> Sealed
 impl<'value, 'top, SymbolType: AsRawSymbolTokenRef> ValueWriter
     for BinaryAnnotationsWrapperWriter<'value, 'top, SymbolType>
 {
-    type ListWriter<'a> = BinaryListValuesWriter_1_0<'a>;
+    type ListWriter = BinaryListWriter_1_0<'value, 'top>;
     type SExpWriter<'a> = BinarySExpValuesWriter_1_0<'a>;
 
     type StructWriter<'a> = BinaryStructFieldsWriter_1_0<'a>;
@@ -465,7 +504,7 @@ impl<'value, 'top, SymbolType: AsRawSymbolTokenRef> ValueWriter
     // Ion 1.0
     type MacroArgsWriter<'a> = Never;
 
-    annotate_and_delegate!(
+    annotate_and_delegate_1_0!(
         IonType => write_null,
         bool => write_bool,
         i64 => write_i64,
@@ -478,25 +517,27 @@ impl<'value, 'top, SymbolType: AsRawSymbolTokenRef> ValueWriter
         impl AsRawSymbolTokenRef => write_symbol,
         impl AsRef<[u8]> => write_clob,
         impl AsRef<[u8]> => write_blob,
+        // impl ContainerFn<Self::ListWriter> => write_list,
     );
 
-    fn write_list<F: for<'a> FnOnce(&mut Self::ListWriter<'a>) -> IonResult<()>>(
-        self,
-        list_fn: F,
-    ) -> IonResult<()> {
-        self.encode_annotated(|value_writer| value_writer.write_list(list_fn))
+    // fn write_list<F: SequenceWriterFn<Self::ListWriter>>(self, list_fn: F) -> IonResult<()> {
+    fn write_list(self, list_fn: impl ContainerFn<Self::ListWriter>) -> IonResult<()> {
+        todo!()
+        // self.encode_annotated(|value_writer| value_writer.write_list(list_fn))
     }
     fn write_sexp<F: for<'a> FnOnce(&mut Self::SExpWriter<'a>) -> IonResult<()>>(
         self,
         sexp_fn: F,
     ) -> IonResult<()> {
-        self.encode_annotated(|value_writer| value_writer.write_sexp(sexp_fn))
+        todo!()
+        // self.encode_annotated(|value_writer| value_writer.write_sexp(sexp_fn))
     }
     fn write_struct<F: for<'a> FnOnce(&mut Self::StructWriter<'a>) -> IonResult<()>>(
         self,
         struct_fn: F,
     ) -> IonResult<()> {
-        self.encode_annotated(|value_writer| value_writer.write_struct(struct_fn))
+        todo!()
+        // self.encode_annotated(|value_writer| value_writer.write_struct(struct_fn))
     }
 
     fn write_eexp<'macro_id, F: for<'a> FnOnce(&mut Self::MacroArgsWriter<'a>) -> IonResult<()>>(
@@ -534,7 +575,7 @@ impl<'value, 'top> BinaryAnnotatedValueWriter_1_0<'value, 'top> {
 impl<'value, 'top> Sealed for BinaryAnnotatedValueWriter_1_0<'value, 'top> {}
 
 impl<'value, 'top: 'value> ValueWriter for BinaryAnnotatedValueWriter_1_0<'value, 'top> {
-    type ListWriter<'a> = BinaryListValuesWriter_1_0<'a>;
+    type ListWriter = BinaryListWriter_1_0<'value, 'top>;
     type SExpWriter<'a> = BinarySExpValuesWriter_1_0<'a>;
     type StructWriter<'a> = BinaryStructFieldsWriter_1_0<'a>;
 
