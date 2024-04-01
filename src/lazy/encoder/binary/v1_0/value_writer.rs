@@ -14,8 +14,7 @@ use crate::binary::uint::DecodedUInt;
 use crate::binary::var_uint::VarUInt;
 use crate::lazy::encoder::binary::annotate_and_delegate_1_0;
 use crate::lazy::encoder::binary::v1_0::container_writers::{
-    BinaryContainerWriter_1_0, BinaryListWriter_1_0, BinarySExpValuesWriter_1_0,
-    BinarySExpWriter_1_0, BinaryStructFieldsWriter_1_0, BinaryStructWriter_1_0,
+    BinaryContainerWriter_1_0, BinaryListWriter_1_0, BinarySExpWriter_1_0, BinaryStructWriter_1_0,
 };
 use crate::lazy::encoder::container_fn::{ListFn, MacroArgsFn, SExpFn, StructFn};
 use crate::lazy::encoder::private::Sealed;
@@ -322,14 +321,63 @@ impl<'value, 'top> BinaryValueWriter_1_0<'value, 'top> {
         self.push_bytes(list_writer.buffer());
         Ok(())
     }
-    fn write_sexp<F: for<'a> FnOnce(&mut <Self as ValueWriter>::SExpWriter) -> IonResult<()>>(
-        &mut self,
-        sexp_fn: F,
-    ) -> IonResult<()> {
-        self.sexp_writer().write_values(sexp_fn)
+    fn write_sexp(&mut self, sexp_fn: impl SExpFn<Self>) -> IonResult<()> {
+        const SEXP_TYPE_CODE: u8 = 0xC0;
+        let child_encoding_buffer = self.allocator.alloc_with(|| {
+            BumpVec::with_capacity_in(DEFAULT_CONTAINER_BUFFER_SIZE, self.allocator)
+        });
+        // Create a BinarySExpWriter_1_0 to pass to the user's closure.
+        let mut sexp_writer = BinarySExpWriter_1_0::new(BinaryContainerWriter_1_0::new(
+            SEXP_TYPE_CODE,
+            self.allocator,
+            child_encoding_buffer,
+        ));
+        // Pass it to the closure, allowing the user to encode child values.
+        sexp_fn.populate(&mut sexp_writer)?;
+        // Write the appropriate opcode for a sexp of this length.
+        let encoded_length = sexp_writer.buffer().len();
+        match encoded_length {
+            0..=15 => {
+                let opcode = 0xC0 | encoded_length as u8;
+                self.push_byte(opcode);
+            }
+            _ => {
+                let opcode = 0xCE; // SExp w/VarUInt length
+                self.push_byte(opcode);
+                VarUInt::write_u64(self.encoding_buffer, encoded_length as u64)?;
+            }
+        }
+        self.push_bytes(sexp_writer.buffer());
+        Ok(())
     }
     fn write_struct(&mut self, struct_fn: impl StructFn<Self>) -> IonResult<()> {
-        self.struct_writer().write_fields(struct_fn)
+        const STRUCT_TYPE_CODE: u8 = 0xD0;
+        let child_encoding_buffer = self.allocator.alloc_with(|| {
+            BumpVec::with_capacity_in(DEFAULT_CONTAINER_BUFFER_SIZE, self.allocator)
+        });
+        // Create a BinarySExpWriter_1_0 to pass to the user's closure.
+        let mut struct_writer = BinaryStructWriter_1_0::new(BinaryContainerWriter_1_0::new(
+            STRUCT_TYPE_CODE,
+            self.allocator,
+            child_encoding_buffer,
+        ));
+        // Pass it to the closure, allowing the user to encode child values.
+        struct_fn(&mut struct_writer)?;
+        // Write the appropriate opcode for a struct of this length.
+        let encoded_length = struct_writer.buffer().len();
+        match encoded_length {
+            0..=15 => {
+                let opcode = 0xD0 | encoded_length as u8;
+                self.push_byte(opcode);
+            }
+            _ => {
+                let opcode = 0xDE; // Struct w/VarUInt length
+                self.push_byte(opcode);
+                VarUInt::write_u64(self.encoding_buffer, encoded_length as u64)?;
+            }
+        }
+        self.push_bytes(struct_writer.buffer());
+        Ok(())
     }
     fn write_eexp<'macro_id>(
         &mut self,
@@ -347,8 +395,8 @@ impl<'value, 'top> Sealed for BinaryValueWriter_1_0<'value, 'top> {}
 
 impl<'value, 'top> ValueWriter for BinaryValueWriter_1_0<'value, 'top> {
     type ListWriter = BinaryListWriter_1_0<'value, 'top>;
-    type SExpWriter = BinarySExpValuesWriter_1_0<'value>;
-    type StructWriter = BinaryStructFieldsWriter_1_0<'value>;
+    type SExpWriter = BinarySExpWriter_1_0<'value, 'top>;
+    type StructWriter = BinaryStructWriter_1_0<'value, 'top>;
 
     type MacroArgsWriter = Never;
 
@@ -361,8 +409,8 @@ pub(crate) struct BinaryValueWriterRef_1_0<'value, 'top>(
 );
 impl<'value, 'top> ValueWriter for &mut BinaryValueWriterRef_1_0<'value, 'top> {
     type ListWriter = BinaryListWriter_1_0<'value, 'top>;
-    type SExpWriter = BinarySExpValuesWriter_1_0<'value>;
-    type StructWriter = BinaryStructFieldsWriter_1_0<'value>;
+    type SExpWriter = BinarySExpWriter_1_0<'value, 'top>;
+    type StructWriter = BinaryStructWriter_1_0<'value, 'top>;
     type MacroArgsWriter = Never;
 
     fn write_null(self, ion_type: IonType) -> IonResult<()> {
@@ -568,9 +616,9 @@ impl<'value, 'top, SymbolType: AsRawSymbolTokenRef> ValueWriter
     for BinaryAnnotationsWrapperWriter<'value, 'top, SymbolType>
 {
     type ListWriter = BinaryListWriter_1_0<'value, 'top>;
-    type SExpWriter = BinarySExpValuesWriter_1_0<'value>;
+    type SExpWriter = BinarySExpWriter_1_0<'value, 'top>;
 
-    type StructWriter = BinaryStructFieldsWriter_1_0<'value>;
+    type StructWriter = BinaryStructWriter_1_0<'value, 'top>;
 
     // Ion 1.0
     type MacroArgsWriter = Never;
@@ -588,12 +636,8 @@ impl<'value, 'top, SymbolType: AsRawSymbolTokenRef> ValueWriter
         impl AsRawSymbolTokenRef => write_symbol,
         impl AsRef<[u8]> => write_clob,
         impl AsRef<[u8]> => write_blob,
-        // impl ContainerFn<Self::ListWriter> => write_list,
     );
-
-    // fn write_list<F: SequenceWriterFn<Self::ListWriter>>(self, list_fn: F) -> IonResult<()> {
     fn write_list(self, list_fn: impl ListFn<Self>) -> IonResult<()> {
-        // todo!()
         self.encode_annotated(|value_writer| value_writer.write_list(list_fn))
     }
     fn write_sexp(self, sexp_fn: impl SExpFn<Self>) -> IonResult<()> {
@@ -621,6 +665,7 @@ mod tests {
     use crate::lazy::encoder::binary::v1_0::writer::LazyRawBinaryWriter_1_0;
     use crate::lazy::encoder::value_writer::AnnotatableValueWriter;
     use crate::lazy::encoder::value_writer::SequenceWriter;
+    use crate::lazy::encoder::value_writer::StructWriter;
     use crate::lazy::encoder::write_as_ion::WriteAsSExp;
     use crate::raw_symbol_token_ref::AsRawSymbolTokenRef;
     use crate::{Element, IonData, IonResult, RawSymbolTokenRef, Timestamp};
