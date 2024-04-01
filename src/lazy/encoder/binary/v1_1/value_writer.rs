@@ -6,7 +6,6 @@ use ice_code::ice as cold_path;
 use num_bigint::BigInt;
 use num_traits::ToPrimitive;
 
-use crate::lazy::encoder::binary::annotate_and_delegate_1_1;
 use crate::lazy::encoder::binary::v1_1::container_writers::{
     BinaryContainerWriter_1_1, BinaryListWriter_1_1, BinaryMacroArgsWriter_1_1,
     BinarySExpWriter_1_1, BinaryStructWriter_1_1,
@@ -814,6 +813,45 @@ impl<'value, 'top> AnnotatableValueWriter for BinaryAnnotatableValueWriter_1_1<'
         writer.delimited_containers = self.delimited_containers;
         writer
     }
+}
+
+/// Takes a series of `TYPE => METHOD` pairs, generating a function for each that encodes an
+/// annotations sequence and then delegates encoding the value to the corresponding value writer
+/// method.
+macro_rules! annotate_and_delegate_1_1 {
+    // End of iteration
+    () => {};
+    // Recurses one argument pair at a time
+    ($value_type:ty => $method:ident, $($rest:tt)*) => {
+        fn $method(mut self, value: $value_type) -> IonResult<()> {
+            match self.annotations {
+                [] => {
+                    // There are no annotations; nothing to do.
+                }
+                [a] => {
+                    // Opcode 0xE7: A single FlexSym annotation follows
+                    self.buffer.push(0xE7);
+                    FlexSym::encode_symbol(self.buffer, a);
+                }
+                [a1, a2] => {
+                    // Opcode 0xE8: Two FlexSym annotations follow
+                    self.buffer.push(0xE8);
+                    FlexSym::encode_symbol(self.buffer, a1);
+                    FlexSym::encode_symbol(self.buffer, a2);
+                }
+                _ => {
+                    self.write_length_prefixed_flex_sym_annotation_sequence();
+                }
+            }
+            // We've encoded the annotations, now create a no-annotations ValueWriter to encode the value itself.
+            let value_writer = $crate::lazy::encoder::binary::v1_1::value_writer::BinaryValueWriter_1_1::new(self.allocator, self.buffer);
+            value_writer.$method(value)
+            // encode_value_fn(value_writer)
+            // self.encode_annotated(|value_writer| value_writer.$method(value))
+            // <Self as AnnotateAndDelegate>::encode_annotated(self, |value_writer| value_writer.$method(value))
+        }
+        annotate_and_delegate_1_1!($($rest)*);
+    };
 }
 
 pub struct BinaryAnnotatedValueWriter_1_1<'value, 'top, SymbolType: AsRawSymbolTokenRef> {

@@ -12,7 +12,6 @@ use crate::binary::timestamp::TimestampBinaryEncoder;
 use crate::binary::uint;
 use crate::binary::uint::DecodedUInt;
 use crate::binary::var_uint::VarUInt;
-use crate::lazy::encoder::binary::annotate_and_delegate_1_0;
 use crate::lazy::encoder::binary::v1_0::container_writers::{
     BinaryContainerWriter_1_0, BinaryListWriter_1_0, BinarySExpWriter_1_0, BinaryStructWriter_1_0,
 };
@@ -474,6 +473,30 @@ impl<'value, 'top, SymbolType: AsRawSymbolTokenRef>
             output_buffer: encoding_buffer,
         }
     }
+}
+
+/// Takes a series of `TYPE => METHOD` pairs, generating a function for each that encodes an
+/// annotations sequence and then delegates encoding the value to the corresponding value writer
+/// method.
+macro_rules! annotate_and_delegate_1_0 {
+    // End of iteration
+    () => {};
+    // Recurses one argument pair at a time
+    ($value_type:ty => $method:ident, $($rest:tt)*) => {
+        fn $method(self, value: $value_type) -> IonResult<()> {
+            let allocator = self.allocator;
+            let buffer = allocator.alloc_with(|| BumpVec::new_in(allocator));
+            // let mut buffer = BumpVec::new_in(allocator);
+            let value_writer =
+                $crate::lazy::encoder::binary::v1_0::value_writer::BinaryValueWriter_1_0::new(
+                    self.allocator,
+                    buffer,
+                );
+            value_writer.$method(value)?;
+            self.annotate_encoded_value(buffer.as_slice())
+        }
+        annotate_and_delegate_1_0!($($rest)*);
+    };
 }
 
 trait EncodeValueFn<V>: FnOnce(&mut V) -> IonResult<()>
