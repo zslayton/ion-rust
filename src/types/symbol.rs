@@ -205,7 +205,7 @@ impl Borrow<str> for Symbol {
     fn borrow(&self) -> &str {
         // TODO: Explain why this choice is arbitrary and harmless
         self.text().unwrap_or("$0")
-            // .expect("cannot borrow a &str from a Symbol with unknown text")
+        // .expect("cannot borrow a &str from a Symbol with unknown text")
     }
 }
 

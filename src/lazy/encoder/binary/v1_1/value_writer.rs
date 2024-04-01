@@ -14,6 +14,7 @@ use crate::lazy::encoder::binary::v1_1::container_writers::{
 use crate::lazy::encoder::binary::v1_1::fixed_int::FixedInt;
 use crate::lazy::encoder::binary::v1_1::fixed_uint::FixedUInt;
 use crate::lazy::encoder::binary::v1_1::flex_sym::FlexSym;
+use crate::lazy::encoder::container_fn::{ListFn, MacroArgsFn, SExpFn, StructFn};
 use crate::lazy::encoder::private::Sealed;
 use crate::lazy::encoder::value_writer::{
     delegate_value_writer_to_self, AnnotatableValueWriter, ValueWriter,
@@ -25,7 +26,6 @@ use crate::types::integer::IntData;
 use crate::{
     Decimal, FlexInt, FlexUInt, Int, IonResult, IonType, RawSymbolTokenRef, SymbolId, Timestamp,
 };
-use crate::lazy::encoder::container_fn::{ListFn, MacroArgsFn, SExpFn, StructFn};
 
 /// The initial size of the bump-allocated buffer created to hold a container's child elements.
 // This number was chosen somewhat arbitrarily and can be updated as needed.
@@ -579,20 +579,14 @@ impl<'value, 'top> BinaryValueWriter_1_1<'value, 'top> {
         Ok(())
     }
 
-    fn write_list(
-        self,
-        list_fn: impl ListFn<Self>,
-    ) -> IonResult<()> {
+    fn write_list(self, list_fn: impl ListFn<Self>) -> IonResult<()> {
         if self.delimited_containers {
             return self.write_delimited_list(list_fn);
         }
         self.write_length_prefixed_list(list_fn)
     }
 
-    fn write_length_prefixed_list(
-        mut self,
-        list_fn: impl ListFn<Self>,
-    ) -> IonResult<()> {
+    fn write_length_prefixed_list(mut self, list_fn: impl ListFn<Self>) -> IonResult<()> {
         // We're writing a length-prefixed list, so we need to set up a space to encode the list's children.
         let child_encoding_buffer = self.allocator.alloc_with(|| {
             BumpVec::with_capacity_in(DEFAULT_CONTAINER_BUFFER_SIZE, self.allocator)
@@ -620,10 +614,7 @@ impl<'value, 'top> BinaryValueWriter_1_1<'value, 'top> {
         Ok(())
     }
 
-    fn write_delimited_list(
-        self,
-        list_fn: impl ListFn<Self>,
-    ) -> IonResult<()> {
+    fn write_delimited_list(self, list_fn: impl ListFn<Self>) -> IonResult<()> {
         let child_encoding_buffer = self.encoding_buffer;
         let container_writer =
             BinaryContainerWriter_1_1::new(self.allocator, child_encoding_buffer);
@@ -634,9 +625,7 @@ impl<'value, 'top> BinaryValueWriter_1_1<'value, 'top> {
         Ok(())
     }
 
-    fn write_sexp<
-        F: for<'a> FnOnce(&mut <Self as ValueWriter>::SExpWriter) -> IonResult<()>,
-    >(
+    fn write_sexp<F: for<'a> FnOnce(&mut <Self as ValueWriter>::SExpWriter) -> IonResult<()>>(
         self,
         sexp_fn: F,
     ) -> IonResult<()> {
@@ -695,10 +684,7 @@ impl<'value, 'top> BinaryValueWriter_1_1<'value, 'top> {
         Ok(())
     }
 
-    fn write_struct(
-        self,
-        struct_fn: impl StructFn<Self>,
-    ) -> IonResult<()> {
+    fn write_struct(self, struct_fn: impl StructFn<Self>) -> IonResult<()> {
         if self.delimited_containers {
             self.write_delimited_struct(struct_fn)
         } else {
@@ -706,10 +692,7 @@ impl<'value, 'top> BinaryValueWriter_1_1<'value, 'top> {
         }
     }
 
-    fn write_delimited_struct(
-        self,
-        struct_fn: impl StructFn<Self>,
-    ) -> IonResult<()> {
+    fn write_delimited_struct(self, struct_fn: impl StructFn<Self>) -> IonResult<()> {
         let fields_encoding_buffer = self.encoding_buffer;
         let container_writer =
             BinaryContainerWriter_1_1::new(self.allocator, fields_encoding_buffer);
@@ -720,10 +703,7 @@ impl<'value, 'top> BinaryValueWriter_1_1<'value, 'top> {
         Ok(())
     }
 
-    fn write_length_prefixed_struct(
-        mut self,
-        struct_fn:  impl StructFn<Self>,
-    ) -> IonResult<()> {
+    fn write_length_prefixed_struct(mut self, struct_fn: impl StructFn<Self>) -> IonResult<()> {
         // We're writing a length-prefixed struct, so we need to set up a space to encode the struct's fields.
         let field_encoding_buffer = self.allocator.alloc_with(|| {
             BumpVec::with_capacity_in(DEFAULT_CONTAINER_BUFFER_SIZE, self.allocator)
@@ -751,9 +731,7 @@ impl<'value, 'top> BinaryValueWriter_1_1<'value, 'top> {
         Ok(())
     }
 
-    fn write_eexp<
-        'macro_id
-    >(
+    fn write_eexp<'macro_id>(
         self,
         macro_id: impl Into<MacroIdRef<'macro_id>>,
         macro_fn: impl MacroArgsFn<Self>,
@@ -935,23 +913,17 @@ impl<'value, 'top, SymbolType: AsRawSymbolTokenRef> ValueWriter
         self.encode_annotated(|value_writer| value_writer.write_list(list_fn))
     }
 
-    fn write_sexp(
-        self,
-        sexp_fn: impl SExpFn<Self>,
-    ) -> IonResult<()> {
+    fn write_sexp(self, sexp_fn: impl SExpFn<Self>) -> IonResult<()> {
         self.encode_annotated(|value_writer| value_writer.write_sexp(sexp_fn))
     }
-    fn write_struct(
-        self,
-        struct_fn: impl StructFn<Self>,
-    ) -> IonResult<()> {
+    fn write_struct(self, struct_fn: impl StructFn<Self>) -> IonResult<()> {
         self.encode_annotated(|value_writer| value_writer.write_struct(struct_fn))
     }
     fn write_eexp<'macro_id>(
         self,
         macro_id: impl Into<MacroIdRef<'macro_id>>,
         macro_fn: impl MacroArgsFn<Self>,
-    ) -> IonResult<()>  {
+    ) -> IonResult<()> {
         // todo!()
         self.encode_annotated(|value_writer| value_writer.write_eexp(macro_id, macro_fn))
     }

@@ -80,15 +80,9 @@ pub trait ValueWriter: Sized {
 
     fn write_list(self, list_fn: impl ListFn<Self>) -> IonResult<()>;
 
-    fn write_sexp(
-        self,
-        sexp_fn: impl SExpFn<Self>,
-    ) -> IonResult<()>;
+    fn write_sexp(self, sexp_fn: impl SExpFn<Self>) -> IonResult<()>;
 
-    fn write_struct(
-        self,
-        struct_fn: impl StructFn<Self>,
-    ) -> IonResult<()>;
+    fn write_struct(self, struct_fn: impl StructFn<Self>) -> IonResult<()>;
 
     fn write_eexp<'macro_id>(
         self,
@@ -202,9 +196,9 @@ macro_rules! delegate_value_writer_to_self {
     };
 }
 
+use crate::lazy::encoder::container_fn::{ListFn, MacroArgsFn, SExpFn, StructFn};
 pub(crate) use delegate_value_writer_to;
 pub(crate) use delegate_value_writer_to_self;
-use crate::lazy::encoder::container_fn::{ListFn, MacroArgsFn, SExpFn, StructFn};
 
 impl<V> ValueWriter for V
 where

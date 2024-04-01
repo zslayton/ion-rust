@@ -1,3 +1,4 @@
+use crate::lazy::encoder::container_fn::{ListFn, MacroArgsFn, SExpFn, StructFn};
 use crate::lazy::encoder::private::Sealed;
 use crate::lazy::encoder::text::LazyRawTextWriter_1_0;
 use crate::lazy::encoder::value_writer::internal::MakeValueWriter;
@@ -16,7 +17,6 @@ use crate::{Decimal, Int, Timestamp};
 use delegate::delegate;
 use std::fmt::Formatter;
 use std::io::Write;
-use crate::lazy::encoder::container_fn::{ListFn, MacroArgsFn, SExpFn, StructFn};
 
 pub struct TextValueWriter_1_0<'value, W: Write + 'value> {
     writer: &'value mut LazyRawTextWriter_1_0<W>,
@@ -474,18 +474,12 @@ impl<'value, W: Write> ValueWriter for TextValueWriter_1_0<'value, W> {
         list_fn.populate(&mut list_writer)?;
         list_writer.end()
     }
-    fn write_sexp(
-        self,
-        sexp_fn: impl SExpFn<Self>,
-    ) -> IonResult<()> {
+    fn write_sexp(self, sexp_fn: impl SExpFn<Self>) -> IonResult<()> {
         let mut sexp_writer = TextSExpWriter_1_0::new(self.writer, self.depth + 1)?;
         sexp_fn(&mut sexp_writer)?;
         sexp_writer.end()
     }
-    fn write_struct(
-        self,
-        struct_fn: impl StructFn<Self>,
-    ) -> IonResult<()> {
+    fn write_struct(self, struct_fn: impl StructFn<Self>) -> IonResult<()> {
         let mut struct_writer = TextStructWriter_1_0::new(self.writer, self.depth + 1)?;
         struct_fn(&mut struct_writer)?;
         struct_writer.end()

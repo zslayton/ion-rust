@@ -1,5 +1,5 @@
-use crate::IonResult;
 use crate::lazy::encoder::value_writer::ValueWriter;
+use crate::IonResult;
 
 ///! Container population traits that allow closures to be used in places where the borrow checker
 /// would normally balk due to point-in-time limitations. TODO link
