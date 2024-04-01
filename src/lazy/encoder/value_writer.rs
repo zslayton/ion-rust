@@ -64,7 +64,7 @@ pub trait ValueWriter: Sized {
     type ListWriter: SequenceWriter;
     type SExpWriter: SequenceWriter;
     type StructWriter: StructWriter;
-    type MacroArgsWriter<'a>: MacroArgsWriter;
+    type MacroArgsWriter: MacroArgsWriter;
     fn write_null(self, ion_type: IonType) -> IonResult<()>;
     fn write_bool(self, value: bool) -> IonResult<()>;
     fn write_i64(self, value: i64) -> IonResult<()>;
@@ -90,10 +90,10 @@ pub trait ValueWriter: Sized {
         struct_fn: impl StructFn<Self>,
     ) -> IonResult<()>;
 
-    fn write_eexp<'macro_id, F: for<'a> FnOnce(&mut Self::MacroArgsWriter<'a>) -> IonResult<()>>(
+    fn write_eexp<'macro_id>(
         self,
         _macro_id: impl Into<MacroIdRef<'macro_id>>,
-        _macro_fn: F,
+        _macro_fn: impl MacroArgsFn<Self>,
     ) -> IonResult<()>;
 
     fn write(self, value: impl WriteAsIonValue) -> IonResult<()> {
@@ -183,11 +183,10 @@ macro_rules! delegate_value_writer_to {
                 ) -> IonResult<()>;
                 fn write_eexp<
                     'macro_id,
-                    F: for<'a> FnOnce(&mut Self::MacroArgsWriter<'a>) -> IonResult<()>
                 >(
                     self,
                     macro_id: impl Into<MacroIdRef<'macro_id>>,
-                    macro_fn: F
+                    macro_fn: impl $crate::lazy::encoder::container_fn::MacroArgsFn<Self>,
                 ) -> IonResult<()>;
             }
         }
@@ -205,7 +204,7 @@ macro_rules! delegate_value_writer_to_self {
 
 pub(crate) use delegate_value_writer_to;
 pub(crate) use delegate_value_writer_to_self;
-use crate::lazy::encoder::container_fn::{ListFn, SExpFn, StructFn};
+use crate::lazy::encoder::container_fn::{ListFn, MacroArgsFn, SExpFn, StructFn};
 
 impl<V> ValueWriter for V
 where
@@ -214,7 +213,7 @@ where
     type ListWriter = <V::ValueWriter as ValueWriter>::ListWriter;
     type SExpWriter = <V::ValueWriter as ValueWriter>::SExpWriter;
     type StructWriter = <V::ValueWriter as ValueWriter>::StructWriter;
-    type MacroArgsWriter<'a> = <V::ValueWriter as ValueWriter>::MacroArgsWriter<'a>;
+    type MacroArgsWriter = <V::ValueWriter as ValueWriter>::MacroArgsWriter;
 
     delegate_value_writer_to!(closure |self_: Self| {
        self_.without_annotations()

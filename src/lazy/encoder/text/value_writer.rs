@@ -16,7 +16,7 @@ use crate::{Decimal, Int, Timestamp};
 use delegate::delegate;
 use std::fmt::Formatter;
 use std::io::Write;
-use crate::lazy::encoder::container_fn::{ListFn, SExpFn, StructFn};
+use crate::lazy::encoder::container_fn::{ListFn, MacroArgsFn, SExpFn, StructFn};
 
 pub struct TextValueWriter_1_0<'value, W: Write + 'value> {
     writer: &'value mut LazyRawTextWriter_1_0<W>,
@@ -337,7 +337,7 @@ impl<'value, W: Write + 'value, SymbolType: AsRawSymbolTokenRef> ValueWriter
     type StructWriter = TextStructWriter_1_0<'value, W>;
 
     // Ion 1.0 does not support macros
-    type MacroArgsWriter<'a> = Never;
+    type MacroArgsWriter = Never;
 
     delegate_value_writer_to!(fallible closure |self_: Self| self_.encode_annotations());
 }
@@ -348,7 +348,7 @@ impl<'value, W: Write> ValueWriter for TextValueWriter_1_0<'value, W> {
     type StructWriter = TextStructWriter_1_0<'value, W>;
 
     // Ion 1.0 does not support macros
-    type MacroArgsWriter<'a> = Never;
+    type MacroArgsWriter = Never;
     fn write_null(mut self, ion_type: IonType) -> IonResult<()> {
         use crate::IonType::*;
         let null_text = match ion_type {
@@ -491,10 +491,10 @@ impl<'value, W: Write> ValueWriter for TextValueWriter_1_0<'value, W> {
         struct_writer.end()
     }
 
-    fn write_eexp<'macro_id, F: for<'a> FnOnce(&mut Self::MacroArgsWriter<'a>) -> IonResult<()>>(
+    fn write_eexp<'macro_id>(
         self,
         macro_id: impl Into<MacroIdRef<'macro_id>>,
-        _macro_fn: F,
+        _macro_fn: impl MacroArgsFn<Self>,
     ) -> IonResult<()> {
         let id = macro_id.into();
         IonResult::encoding_error(format!(

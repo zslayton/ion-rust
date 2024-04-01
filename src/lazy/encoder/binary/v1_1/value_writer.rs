@@ -15,9 +15,8 @@ use crate::lazy::encoder::binary::v1_1::fixed_int::FixedInt;
 use crate::lazy::encoder::binary::v1_1::fixed_uint::FixedUInt;
 use crate::lazy::encoder::binary::v1_1::flex_sym::FlexSym;
 use crate::lazy::encoder::private::Sealed;
-use crate::lazy::encoder::value_writer::internal::MakeValueWriter;
 use crate::lazy::encoder::value_writer::{
-    delegate_value_writer_to_self, AnnotatableValueWriter, SequenceWriter, ValueWriter,
+    delegate_value_writer_to_self, AnnotatableValueWriter, ValueWriter,
 };
 use crate::lazy::text::raw::v1_1::reader::MacroIdRef;
 use crate::raw_symbol_token_ref::AsRawSymbolTokenRef;
@@ -26,7 +25,7 @@ use crate::types::integer::IntData;
 use crate::{
     Decimal, FlexInt, FlexUInt, Int, IonResult, IonType, RawSymbolTokenRef, SymbolId, Timestamp,
 };
-use crate::lazy::encoder::container_fn::{ListFn, SExpFn, StructFn};
+use crate::lazy::encoder::container_fn::{ListFn, MacroArgsFn, SExpFn, StructFn};
 
 /// The initial size of the bump-allocated buffer created to hold a container's child elements.
 // This number was chosen somewhat arbitrarily and can be updated as needed.
@@ -622,7 +621,7 @@ impl<'value, 'top> BinaryValueWriter_1_1<'value, 'top> {
     }
 
     fn write_delimited_list(
-        mut self,
+        self,
         list_fn: impl ListFn<Self>,
     ) -> IonResult<()> {
         let child_encoding_buffer = self.encoding_buffer;
@@ -753,12 +752,11 @@ impl<'value, 'top> BinaryValueWriter_1_1<'value, 'top> {
     }
 
     fn write_eexp<
-        'macro_id,
-        F: for<'a> FnOnce(&mut <Self as ValueWriter>::MacroArgsWriter<'a>) -> IonResult<()>,
+        'macro_id
     >(
         self,
         macro_id: impl Into<MacroIdRef<'macro_id>>,
-        macro_fn: F,
+        macro_fn: impl MacroArgsFn<Self>,
     ) -> IonResult<()> {
         match macro_id.into() {
             MacroIdRef::LocalName(_name) => {
@@ -786,7 +784,7 @@ impl<'value, 'top> ValueWriter for BinaryValueWriter_1_1<'value, 'top> {
     type SExpWriter = BinarySExpWriter_1_1<'value, 'top>;
     type StructWriter = BinaryStructWriter_1_1<'value, 'top>;
 
-    type MacroArgsWriter<'a> = BinaryMacroArgsWriter_1_1<'value, 'top>;
+    type MacroArgsWriter = BinaryMacroArgsWriter_1_1<'value, 'top>;
 
     delegate_value_writer_to_self!();
 }
@@ -915,7 +913,7 @@ impl<'value, 'top, SymbolType: AsRawSymbolTokenRef> ValueWriter
     type ListWriter = BinaryListWriter_1_1<'value, 'top>;
     type SExpWriter = BinarySExpWriter_1_1<'value, 'top>;
     type StructWriter = BinaryStructWriter_1_1<'value, 'top>;
-    type MacroArgsWriter<'a> = BinaryMacroArgsWriter_1_1<'value, 'top>;
+    type MacroArgsWriter = BinaryMacroArgsWriter_1_1<'value, 'top>;
 
     annotate_and_delegate_1_1!(
         IonType => write_null,
@@ -949,13 +947,13 @@ impl<'value, 'top, SymbolType: AsRawSymbolTokenRef> ValueWriter
     ) -> IonResult<()> {
         self.encode_annotated(|value_writer| value_writer.write_struct(struct_fn))
     }
-    fn write_eexp<'macro_id, F: for<'a> FnOnce(&mut Self::MacroArgsWriter<'a>) -> IonResult<()>>(
+    fn write_eexp<'macro_id>(
         self,
         macro_id: impl Into<MacroIdRef<'macro_id>>,
-        macro_fn: F,
-    ) -> IonResult<()> {
-        todo!()
-        // self.encode_annotated(|value_writer| value_writer.write_eexp(macro_id, macro_fn))
+        macro_fn: impl MacroArgsFn<Self>,
+    ) -> IonResult<()>  {
+        // todo!()
+        self.encode_annotated(|value_writer| value_writer.write_eexp(macro_id, macro_fn))
     }
 }
 
