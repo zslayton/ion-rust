@@ -32,8 +32,8 @@ macro_rules! container_fn_trait {
 
 container_fn_trait!(
     ListFn => ListWriter,
-    // SExpFn => SExpWriter,
-    // StructFn => StructWriter,
+    SExpFn => SExpWriter,
+    StructFn => StructWriter,
     // MacroArgsFn => MacroArgsWriter,
 );
 

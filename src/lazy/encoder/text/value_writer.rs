@@ -16,7 +16,7 @@ use crate::{Decimal, Int, Timestamp};
 use delegate::delegate;
 use std::fmt::Formatter;
 use std::io::Write;
-use crate::lazy::encoder::container_fn::ListFn;
+use crate::lazy::encoder::container_fn::{ListFn, SExpFn, StructFn};
 
 pub struct TextValueWriter_1_0<'value, W: Write + 'value> {
     writer: &'value mut LazyRawTextWriter_1_0<W>,
@@ -333,8 +333,8 @@ impl<'value, W: Write + 'value, SymbolType: AsRawSymbolTokenRef> ValueWriter
     for TextAnnotatedValueWriter_1_0<'value, W, SymbolType>
 {
     type ListWriter = TextListWriter_1_0<'value, W>;
-    type SExpWriter<'a> = TextSExpWriter_1_0<'value, W>;
-    type StructWriter<'a> = TextStructWriter_1_0<'value, W>;
+    type SExpWriter = TextSExpWriter_1_0<'value, W>;
+    type StructWriter = TextStructWriter_1_0<'value, W>;
 
     // Ion 1.0 does not support macros
     type MacroArgsWriter<'a> = Never;
@@ -344,8 +344,8 @@ impl<'value, W: Write + 'value, SymbolType: AsRawSymbolTokenRef> ValueWriter
 
 impl<'value, W: Write> ValueWriter for TextValueWriter_1_0<'value, W> {
     type ListWriter = TextListWriter_1_0<'value, W>;
-    type SExpWriter<'a> = TextSExpWriter_1_0<'value, W>;
-    type StructWriter<'a> = TextStructWriter_1_0<'value, W>;
+    type SExpWriter = TextSExpWriter_1_0<'value, W>;
+    type StructWriter = TextStructWriter_1_0<'value, W>;
 
     // Ion 1.0 does not support macros
     type MacroArgsWriter<'a> = Never;
@@ -474,17 +474,17 @@ impl<'value, W: Write> ValueWriter for TextValueWriter_1_0<'value, W> {
         list_fn.populate(&mut list_writer)?;
         list_writer.end()
     }
-    fn write_sexp<F: for<'a> FnOnce(&mut Self::SExpWriter<'a>) -> IonResult<()>>(
+    fn write_sexp(
         self,
-        sexp_fn: F,
+        sexp_fn: impl SExpFn<Self>,
     ) -> IonResult<()> {
         let mut sexp_writer = TextSExpWriter_1_0::new(self.writer, self.depth + 1)?;
         sexp_fn(&mut sexp_writer)?;
         sexp_writer.end()
     }
-    fn write_struct<F: for<'a> FnOnce(&mut Self::StructWriter<'a>) -> IonResult<()>>(
+    fn write_struct(
         self,
-        struct_fn: F,
+        struct_fn: impl StructFn<Self>,
     ) -> IonResult<()> {
         let mut struct_writer = TextStructWriter_1_0::new(self.writer, self.depth + 1)?;
         struct_fn(&mut struct_writer)?;

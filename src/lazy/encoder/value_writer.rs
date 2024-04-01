@@ -62,8 +62,8 @@ pub trait MacroArgsWriter: SequenceWriter {
 
 pub trait ValueWriter: Sized {
     type ListWriter: SequenceWriter;
-    type SExpWriter<'a>: SequenceWriter;
-    type StructWriter<'a>: StructWriter;
+    type SExpWriter: SequenceWriter;
+    type StructWriter: StructWriter;
     type MacroArgsWriter<'a>: MacroArgsWriter;
     fn write_null(self, ion_type: IonType) -> IonResult<()>;
     fn write_bool(self, value: bool) -> IonResult<()>;
@@ -80,14 +80,14 @@ pub trait ValueWriter: Sized {
 
     fn write_list(self, list_fn: impl ListFn<Self>) -> IonResult<()>;
 
-    fn write_sexp<F: for<'a> FnOnce(&mut Self::SExpWriter<'a>) -> IonResult<()>>(
+    fn write_sexp(
         self,
-        sexp_fn: F,
+        sexp_fn: impl SExpFn<Self>,
     ) -> IonResult<()>;
 
-    fn write_struct<F: for<'a> FnOnce(&mut Self::StructWriter<'a>) -> IonResult<()>>(
+    fn write_struct(
         self,
-        struct_fn: F,
+        struct_fn: impl StructFn<Self>,
     ) -> IonResult<()>;
 
     fn write_eexp<'macro_id, F: for<'a> FnOnce(&mut Self::MacroArgsWriter<'a>) -> IonResult<()>>(
@@ -173,15 +173,13 @@ macro_rules! delegate_value_writer_to {
                 fn write_clob(self, value: impl AsRef<[u8]>) -> IonResult<()>;
                 fn write_blob(self, value: impl AsRef<[u8]>) -> IonResult<()>;
                 fn write_list(self, list_fn: impl $crate::lazy::encoder::container_fn::ListFn<Self>) -> IonResult<()>;
-                fn write_sexp<F: for<'a> FnOnce(&mut Self::SExpWriter<'a>) -> IonResult<()>>(
+                fn write_sexp(
                     self,
-                    sexp_fn: F,
+                    sexp_fn: impl $crate::lazy::encoder::container_fn::SExpFn<Self>,
                 ) -> IonResult<()>;
-                fn write_struct<
-                    F: for<'a> FnOnce(&mut Self::StructWriter<'a>) -> IonResult<()>,
-                >(
+                fn write_struct(
                     self,
-                    struct_fn: F,
+                    struct_fn: impl $crate::lazy::encoder::container_fn::StructFn<Self>,
                 ) -> IonResult<()>;
                 fn write_eexp<
                     'macro_id,
@@ -207,15 +205,15 @@ macro_rules! delegate_value_writer_to_self {
 
 pub(crate) use delegate_value_writer_to;
 pub(crate) use delegate_value_writer_to_self;
-use crate::lazy::encoder::container_fn::ListFn;
+use crate::lazy::encoder::container_fn::{ListFn, SExpFn, StructFn};
 
 impl<V> ValueWriter for V
 where
     V: AnnotatableValueWriter,
 {
     type ListWriter = <V::ValueWriter as ValueWriter>::ListWriter;
-    type SExpWriter<'a> = <V::ValueWriter as ValueWriter>::SExpWriter<'a>;
-    type StructWriter<'a> = <V::ValueWriter as ValueWriter>::StructWriter<'a>;
+    type SExpWriter = <V::ValueWriter as ValueWriter>::SExpWriter;
+    type StructWriter = <V::ValueWriter as ValueWriter>::StructWriter;
     type MacroArgsWriter<'a> = <V::ValueWriter as ValueWriter>::MacroArgsWriter<'a>;
 
     delegate_value_writer_to!(closure |self_: Self| {
