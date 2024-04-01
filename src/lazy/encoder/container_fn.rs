@@ -1,9 +1,8 @@
+//! Container population traits that allow closures to be used in places where the borrow checker
+//! would normally balk due to point-in-time limitations. TODO link
+
 use crate::lazy::encoder::value_writer::ValueWriter;
 use crate::IonResult;
-
-///! Container population traits that allow closures to be used in places where the borrow checker
-/// would normally balk due to point-in-time limitations. TODO link
-///
 
 macro_rules! container_fn_trait {
     // End of iteration

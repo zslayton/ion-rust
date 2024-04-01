@@ -18,9 +18,7 @@ use crate::lazy::encoder::binary::v1_0::container_writers::{
 };
 use crate::lazy::encoder::container_fn::{ListFn, MacroArgsFn, SExpFn, StructFn};
 use crate::lazy::encoder::private::Sealed;
-use crate::lazy::encoder::value_writer::{
-    delegate_value_writer_to, AnnotatableValueWriter, ValueWriter,
-};
+use crate::lazy::encoder::value_writer::{delegate_value_writer_to, AnnotatableValueWriter, ValueWriter};
 use crate::lazy::never::Never;
 use crate::lazy::text::raw::v1_1::reader::MacroIdRef;
 use crate::raw_symbol_token_ref::AsRawSymbolTokenRef;
@@ -407,64 +405,14 @@ impl<'value, 'top> ValueWriter for BinaryValueWriter_1_0<'value, 'top> {
 pub(crate) struct BinaryValueWriterRef_1_0<'value, 'top>(
     pub(crate) BinaryValueWriter_1_0<'value, 'top>,
 );
+
 impl<'value, 'top> ValueWriter for &mut BinaryValueWriterRef_1_0<'value, 'top> {
     type ListWriter = BinaryListWriter_1_0<'value, 'top>;
     type SExpWriter = BinarySExpWriter_1_0<'value, 'top>;
     type StructWriter = BinaryStructWriter_1_0<'value, 'top>;
     type MacroArgsWriter = Never;
 
-    fn write_null(self, ion_type: IonType) -> IonResult<()> {
-        (&mut self.0).write_null(ion_type)
-    }
-    fn write_bool(self, value: bool) -> IonResult<()> {
-        (&mut self.0).write_bool(value)
-    }
-    fn write_i64(self, value: i64) -> IonResult<()> {
-        (&mut self.0).write_i64(value)
-    }
-    fn write_int(self, value: &Int) -> IonResult<()> {
-        (&mut self.0).write_int(value)
-    }
-    fn write_f32(self, value: f32) -> IonResult<()> {
-        (&mut self.0).write_f32(value)
-    }
-    fn write_f64(self, value: f64) -> IonResult<()> {
-        (&mut self.0).write_f64(value)
-    }
-    fn write_decimal(self, value: &Decimal) -> IonResult<()> {
-        (&mut self.0).write_decimal(value)
-    }
-    fn write_timestamp(self, value: &Timestamp) -> IonResult<()> {
-        (&mut self.0).write_timestamp(value)
-    }
-    fn write_string(self, value: impl AsRef<str>) -> IonResult<()> {
-        (&mut self.0).write_string(value)
-    }
-    fn write_symbol(self, value: impl AsRawSymbolTokenRef) -> IonResult<()> {
-        (&mut self.0).write_symbol(value)
-    }
-    fn write_clob(self, value: impl AsRef<[u8]>) -> IonResult<()> {
-        (&mut self.0).write_clob(value)
-    }
-    fn write_blob(self, value: impl AsRef<[u8]>) -> IonResult<()> {
-        (&mut self.0).write_blob(value)
-    }
-    fn write_list(self, list_fn: impl ListFn<Self>) -> IonResult<()> {
-        (&mut self.0).write_list(list_fn)
-    }
-    fn write_sexp(self, sexp_fn: impl SExpFn<Self>) -> IonResult<()> {
-        (&mut self.0).write_sexp(sexp_fn)
-    }
-    fn write_struct(self, struct_fn: impl StructFn<Self>) -> IonResult<()> {
-        (&mut self.0).write_struct(struct_fn)
-    }
-    fn write_eexp<'macro_id>(
-        self,
-        macro_id: impl Into<MacroIdRef<'macro_id>>,
-        macro_fn: impl MacroArgsFn<Self>,
-    ) -> IonResult<()> {
-        (&mut self.0).write_eexp(macro_id.into(), macro_fn)
-    }
+    delegate_value_writer_to!(closure |self_: Self| &mut self_.0);
 }
 
 pub struct BinaryAnnotatableValueWriter_1_0<'value, 'top> {
