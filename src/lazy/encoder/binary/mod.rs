@@ -29,7 +29,7 @@ macro_rules! annotate_and_delegate_1_0 {
             let mut buffer = allocator.alloc_with(|| BumpVec::new_in(allocator));
             // let mut buffer = BumpVec::new_in(allocator);
             let value_writer =
-                $crate::lazy::encoder::binary::v1_0::value_writer::BinaryAnnotatedValueWriter_1_0::new(
+                $crate::lazy::encoder::binary::v1_0::value_writer::BinaryValueWriter_1_0::new(
                     self.allocator,
                     &mut buffer,
                 );

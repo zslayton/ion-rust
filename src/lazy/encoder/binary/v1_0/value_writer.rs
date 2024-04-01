@@ -17,7 +17,7 @@ use crate::lazy::encoder::binary::v1_0::container_writers::{
     BinaryContainerWriter_1_0, BinaryListWriter_1_0, BinarySExpValuesWriter_1_0,
     BinarySExpWriter_1_0, BinaryStructFieldsWriter_1_0, BinaryStructWriter_1_0,
 };
-use crate::lazy::encoder::foo::ContainerFn;
+use crate::lazy::encoder::foo::SExpFn;
 use crate::lazy::encoder::private::Sealed;
 use crate::lazy::encoder::value_writer::{
     delegate_value_writer_to, delegate_value_writer_to_self, AnnotatableValueWriter, ValueWriter,
@@ -290,7 +290,7 @@ impl<'value, 'top> BinaryValueWriter_1_0<'value, 'top> {
     // ) -> IonResult<()> {
     fn write_list(
         mut self,
-        list_fn: impl ContainerFn<<Self as ValueWriter>::ListWriter>,
+        list_fn: impl SExpFn<Self>,
     ) -> IonResult<()> {
         const LIST_TYPE_CODE: u8 = 0xB0;
         let child_encoding_buffer = self.allocator.alloc_with(|| {
@@ -521,7 +521,7 @@ impl<'value, 'top, SymbolType: AsRawSymbolTokenRef> ValueWriter
     );
 
     // fn write_list<F: SequenceWriterFn<Self::ListWriter>>(self, list_fn: F) -> IonResult<()> {
-    fn write_list(self, list_fn: impl ContainerFn<Self::ListWriter>) -> IonResult<()> {
+    fn write_list(self, list_fn: impl SExpFn<Self>) -> IonResult<()> {
         todo!()
         // self.encode_annotated(|value_writer| value_writer.write_list(list_fn))
     }
@@ -552,38 +552,38 @@ impl<'value, 'top, SymbolType: AsRawSymbolTokenRef> ValueWriter
     }
 }
 
-pub struct BinaryAnnotatedValueWriter_1_0<'value, 'top> {
-    allocator: &'top BumpAllocator,
-    // Note that unlike the BinaryValueWriter_1_0, the borrow and the BumpVec here have the same
-    // lifetime. This allows this type to be passed as a closure argument.
-    buffer: &'value mut BumpVec<'top, u8>,
-}
+// pub struct BinaryAnnotatedValueWriter_1_0<'value, 'top> {
+//     allocator: &'top BumpAllocator,
+//     // Note that unlike the BinaryValueWriter_1_0, the borrow and the BumpVec here have the same
+//     // lifetime. This allows this type to be passed as a closure argument.
+//     buffer: &'value mut BumpVec<'top, u8>,
+// }
 
-impl<'value, 'top> BinaryAnnotatedValueWriter_1_0<'value, 'top> {
-    pub fn new(allocator: &'top BumpAllocator, buffer: &'value mut BumpVec<'top, u8>) -> Self {
-        Self { allocator, buffer }
-    }
-    pub(crate) fn value_writer(self) -> BinaryValueWriter_1_0<'value, 'top> {
-        BinaryValueWriter_1_0::new(self.allocator, self.buffer)
-    }
-
-    pub(crate) fn buffer(&self) -> &[u8] {
-        self.buffer.as_slice()
-    }
-}
-
-impl<'value, 'top> Sealed for BinaryAnnotatedValueWriter_1_0<'value, 'top> {}
-
-impl<'value, 'top: 'value> ValueWriter for BinaryAnnotatedValueWriter_1_0<'value, 'top> {
-    type ListWriter = BinaryListWriter_1_0<'value, 'top>;
-    type SExpWriter<'a> = BinarySExpValuesWriter_1_0<'a>;
-    type StructWriter<'a> = BinaryStructFieldsWriter_1_0<'a>;
-
-    // Ion 1.0 does not support macros
-    type MacroArgsWriter<'a> = Never;
-
-    delegate_value_writer_to!(closure |self_: Self| self_.value_writer());
-}
+// impl<'value, 'top> BinaryAnnotatedValueWriter_1_0<'value, 'top> {
+//     pub fn new(allocator: &'top BumpAllocator, buffer: &'value mut BumpVec<'top, u8>) -> Self {
+//         Self { allocator, buffer }
+//     }
+//     pub(crate) fn value_writer(self) -> BinaryValueWriter_1_0<'value, 'top> {
+//         BinaryValueWriter_1_0::new(self.allocator, self.buffer)
+//     }
+//
+//     pub(crate) fn buffer(&self) -> &[u8] {
+//         self.buffer.as_slice()
+//     }
+// }
+//
+// impl<'value, 'top> Sealed for BinaryAnnotatedValueWriter_1_0<'value, 'top> {}
+//
+// impl<'value, 'top: 'value> ValueWriter for BinaryAnnotatedValueWriter_1_0<'value, 'top> {
+//     type ListWriter = <BinaryValueWriter_1_0<'value, 'top> as ValueWriter>::ListWriter; // BinaryListWriter_1_0<'value, 'top>;
+//     type SExpWriter<'a> = BinarySExpValuesWriter_1_0<'a>;
+//     type StructWriter<'a> = BinaryStructFieldsWriter_1_0<'a>;
+//
+//     // Ion 1.0 does not support macros
+//     type MacroArgsWriter<'a> = Never;
+//
+//     delegate_value_writer_to!(closure |self_: Self| self_.value_writer());
+// }
 #[cfg(test)]
 mod tests {
     use crate::lazy::encoder::annotate::Annotate;
@@ -592,6 +592,7 @@ mod tests {
     use crate::lazy::encoder::write_as_ion::WriteAsSExp;
     use crate::raw_symbol_token_ref::AsRawSymbolTokenRef;
     use crate::{Element, IonData, IonResult, RawSymbolTokenRef, Timestamp};
+    use crate::lazy::encoder::value_writer::SequenceWriter;
 
     fn writer_test(
         expected: &str,

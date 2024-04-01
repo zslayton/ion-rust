@@ -1,4 +1,4 @@
-use crate::lazy::encoder::foo::ContainerFn;
+use crate::lazy::encoder::foo::SExpFn;
 use crate::lazy::encoder::private::Sealed;
 use crate::lazy::encoder::text::LazyRawTextWriter_1_0;
 use crate::lazy::encoder::value_writer::internal::MakeValueWriter;
@@ -469,7 +469,7 @@ impl<'value, W: Write> ValueWriter for TextValueWriter_1_0<'value, W> {
     }
 
     // fn write_list(self, list_fn: impl for<'a> ContainerFn<Self::ListWriter>) -> IonResult<()> {
-    fn write_list(self, list_fn: impl ContainerFn<Self::ListWriter>) -> IonResult<()> {
+    fn write_list(self, list_fn: impl SExpFn<Self>) -> IonResult<()> {
         let mut list_writer = TextListWriter_1_0::new(self.writer, self.depth + 1)?;
         list_fn.populate(&mut list_writer)?;
         list_writer.end()
