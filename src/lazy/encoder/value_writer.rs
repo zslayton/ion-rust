@@ -44,22 +44,6 @@ pub trait MacroArgsWriter: SequenceWriter {
     // TODO: methods for writing tagless encodings
 }
 
-// pub(crate) mod private {
-//     use crate::lazy::encoder::value_writer::{MacroArgsWriter, SequenceWriter, StructWriter};
-//
-//     pub trait ValueWriterBase {
-//         type ListWriter: SequenceWriter;
-//         type SExpWriter: SequenceWriter;
-//         type StructWriter: StructWriter;
-//         type MacroArgsWriter: MacroArgsWriter;
-//
-//         fn make_list_writer(&mut self) -> Self::ListWriter;
-//         fn make_sexp_writer(&mut self) -> Self::SExpWriter;
-//         fn make_struct_writer(&mut self) -> Self::StructWriter;
-//         fn make_macro_args_writer(&mut self) -> Self::MacroArgsWriter;
-//     }
-// }
-
 pub trait ValueWriter: Sized {
     type ListWriter: SequenceWriter;
     type SExpWriter: SequenceWriter;

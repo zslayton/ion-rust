@@ -33,12 +33,6 @@ impl Fields {
                 self.by_name.get(text)
             })
             .unwrap_or_else(|| {
-                // let mut indexes = IndexVec::new();
-                // self.by_index.iter().enumerate().filter(|(index, (name, value))| name.text().is_none())
-                //     .map(|(index, _)| index)
-                //     .for_each(|index| indexes.push(index));
-                // indexes
-                // //
                 // Otherwise, construct a (cheap, stack-allocated) Symbol with unknown text...
                 let symbol = Symbol::unknown_text();
                 // ...and use the unknown text symbol to look up matching field values

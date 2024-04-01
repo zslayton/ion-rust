@@ -595,7 +595,7 @@ impl<'value, 'top> BinaryValueWriter_1_1<'value, 'top> {
             BinaryContainerWriter_1_1::new(self.allocator, child_encoding_buffer);
         let mut list_writer = BinaryListWriter_1_1::new(container_writer);
         // Pass it to the closure, allowing the user to encode child values.
-        list_fn.populate(&mut list_writer)?;
+        list_fn(&mut list_writer)?;
         // Write the appropriate opcode for a list of this length
         let encoded_length = list_writer.container_writer.buffer().len();
         match encoded_length {
@@ -619,14 +619,14 @@ impl<'value, 'top> BinaryValueWriter_1_1<'value, 'top> {
             BinaryContainerWriter_1_1::new(self.allocator, child_encoding_buffer);
         let list_writer = &mut BinaryListWriter_1_1::new(container_writer);
         list_writer.container_writer.buffer().push(0xF1); // Start delimited list
-        list_fn.populate(list_writer)?;
+        list_fn(list_writer)?;
         list_writer.container_writer.buffer().push(0xF0); // End delimited container
         Ok(())
     }
 
-    fn write_sexp<F: for<'a> FnOnce(&mut <Self as ValueWriter>::SExpWriter) -> IonResult<()>>(
+    fn write_sexp(
         self,
-        sexp_fn: F,
+        sexp_fn: impl SExpFn<Self>,
     ) -> IonResult<()> {
         if self.delimited_containers {
             return self.write_delimited_sexp(sexp_fn);
@@ -634,11 +634,9 @@ impl<'value, 'top> BinaryValueWriter_1_1<'value, 'top> {
         self.write_length_prefixed_sexp(sexp_fn)
     }
 
-    fn write_length_prefixed_sexp<
-        F: for<'a> FnOnce(&mut <Self as ValueWriter>::SExpWriter) -> IonResult<()>,
-    >(
+    fn write_length_prefixed_sexp(
         mut self,
-        sexp_fn: F,
+        sexp_fn: impl SExpFn<Self>,
     ) -> IonResult<()> {
         // We're writing a length-prefixed sexp, so we need to set up a space to encode the sexp's children.
         let child_encoding_buffer = self.allocator.alloc_with(|| {
@@ -667,11 +665,9 @@ impl<'value, 'top> BinaryValueWriter_1_1<'value, 'top> {
         Ok(())
     }
 
-    fn write_delimited_sexp<
-        F: for<'a> FnOnce(&mut <Self as ValueWriter>::SExpWriter) -> IonResult<()>,
-    >(
+    fn write_delimited_sexp(
         self,
-        sexp_fn: F,
+        sexp_fn: impl SExpFn<Self>,
     ) -> IonResult<()> {
         let child_encoding_buffer = self.encoding_buffer;
         let container_writer =
@@ -946,7 +942,6 @@ impl<'value, 'top, SymbolType: AsRawSymbolTokenRef> ValueWriter
         impl AsRef<[u8]> => write_blob,
     );
 
-    // fn write_list(self, list_fn: impl for<'a> WriteSequenceFn<Self::ListWriter>) -> IonResult<()> {
     fn write_list(self, list_fn: impl ListFn<Self>) -> IonResult<()> {
         self.encode_annotated(|value_writer| value_writer.write_list(list_fn))
     }

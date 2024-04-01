@@ -65,13 +65,6 @@ impl<'value, 'top> BinaryValueWriter_1_0<'value, 'top> {
         self.encoding_buffer.as_slice()
     }
 
-    pub(crate) fn local_value_writer(&mut self) -> BinaryValueWriter_1_0<'_, 'top> {
-        BinaryValueWriter_1_0 {
-            allocator: self.allocator,
-            encoding_buffer: &mut *self.encoding_buffer,
-        }
-    }
-
     pub fn write_symbol_id(&mut self, symbol_id: SymbolId) -> IonResult<()> {
         const SYMBOL_BUFFER_SIZE: usize = mem::size_of::<u64>();
         let mut buffer = [0u8; SYMBOL_BUFFER_SIZE];
@@ -258,15 +251,6 @@ impl<'value, 'top> BinaryValueWriter_1_0<'value, 'top> {
         self.write_lob(bytes, 0xA0)
     }
 
-    // fn list_writer(&mut self) -> BinaryListWriter_1_0<'_, 'top> {
-    //     const LIST_TYPE_CODE: u8 = 0xB0;
-    //     BinaryListWriter_1_0::new(BinaryContainerWriter_1_0::new(
-    //         LIST_TYPE_CODE,
-    //         self.allocator,
-    //         self.encoding_buffer,
-    //     ))
-    // }
-
     fn sexp_writer(&mut self) -> BinarySExpWriter_1_0<'_, 'top> {
         const SEXP_TYPE_CODE: u8 = 0xC0;
         BinarySExpWriter_1_0::new(BinaryContainerWriter_1_0::new(
@@ -285,10 +269,6 @@ impl<'value, 'top> BinaryValueWriter_1_0<'value, 'top> {
         ))
     }
 
-    // fn write_list<F: for<'a> ContainerFn<<Self as ValueWriter>::ListWriter>>(
-    //     mut self,
-    //     list_fn: F,
-    // ) -> IonResult<()> {
     fn write_list(&mut self, list_fn: impl ListFn<Self>) -> IonResult<()> {
         const LIST_TYPE_CODE: u8 = 0xB0;
         let child_encoding_buffer = self.allocator.alloc_with(|| {
@@ -301,7 +281,7 @@ impl<'value, 'top> BinaryValueWriter_1_0<'value, 'top> {
             child_encoding_buffer,
         ));
         // Pass it to the closure, allowing the user to encode child values.
-        list_fn.populate(&mut list_writer)?;
+        list_fn(&mut list_writer)?;
         // Write the appropriate opcode for a list of this length.
         let encoded_length = list_writer.buffer().len();
         match encoded_length {
@@ -330,7 +310,7 @@ impl<'value, 'top> BinaryValueWriter_1_0<'value, 'top> {
             child_encoding_buffer,
         ));
         // Pass it to the closure, allowing the user to encode child values.
-        sexp_fn.populate(&mut sexp_writer)?;
+        sexp_fn(&mut sexp_writer)?;
         // Write the appropriate opcode for a sexp of this length.
         let encoded_length = sexp_writer.buffer().len();
         match encoded_length {
@@ -486,7 +466,6 @@ macro_rules! annotate_and_delegate_1_0 {
         fn $method(self, value: $value_type) -> IonResult<()> {
             let allocator = self.allocator;
             let buffer = allocator.alloc_with(|| BumpVec::new_in(allocator));
-            // let mut buffer = BumpVec::new_in(allocator);
             let value_writer =
                 $crate::lazy::encoder::binary::v1_0::value_writer::BinaryValueWriter_1_0::new(
                     self.allocator,
@@ -519,9 +498,6 @@ where
 impl<'value, 'top, SymbolType: AsRawSymbolTokenRef>
     BinaryAnnotationsWrapperWriter<'value, 'top, SymbolType>
 {
-    // fn encode_annotated<F>(self, encode_value_fn: F) -> IonResult<()>
-    // where
-    //     F: FnOnce(BinaryValueWriter_1_0<'value, 'top>) -> IonResult<()>,
     fn encode_annotated(
         self,
         encode_value_fn: impl EncodeValueFn<BinaryValueWriterRef_1_0<'value, 'top>>,
@@ -650,7 +626,6 @@ mod tests {
         let mut writer = LazyRawBinaryWriter_1_0::new(&mut buffer)?;
         test(&mut writer)?;
         writer.flush()?;
-        println!("{buffer:0x?}");
         let actual = Element::read_all(buffer)?;
         assert!(
             IonData::eq(&expected, &actual),

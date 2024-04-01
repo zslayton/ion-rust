@@ -468,10 +468,9 @@ impl<'value, W: Write> ValueWriter for TextValueWriter_1_0<'value, W> {
         Ok(())
     }
 
-    // fn write_list(self, list_fn: impl for<'a> ContainerFn<Self::ListWriter>) -> IonResult<()> {
     fn write_list(self, list_fn: impl ListFn<Self>) -> IonResult<()> {
         let mut list_writer = TextListWriter_1_0::new(self.writer, self.depth + 1)?;
-        list_fn.populate(&mut list_writer)?;
+        list_fn(&mut list_writer)?;
         list_writer.end()
     }
     fn write_sexp(self, sexp_fn: impl SExpFn<Self>) -> IonResult<()> {
