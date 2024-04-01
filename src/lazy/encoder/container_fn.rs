@@ -6,35 +6,80 @@ use crate::IonResult;
 
 ///! Container population traits that allow closures to be used in places where the borrow checker
 /// would normally balk due to point-in-time limitations. TODO link
+///
+
+macro_rules! container_fn_trait {
+    // End of iteration
+    () => {};
+    // Recurses one argument pair at a time
+    ($trait_name:ident => $assoc_type_name:ident, $($rest:tt)*) => {
+        pub trait $trait_name<V: ValueWriter>: FnOnce(&mut V::$assoc_type_name) -> IonResult<()> {
+            fn populate(self, writer: &mut V::$assoc_type_name) -> IonResult<()>;
+        }
+
+        impl<F, V: ValueWriter> $trait_name<V> for F
+            where
+                F: FnOnce(&mut V::$assoc_type_name) -> IonResult<()>,
+        {
+            fn populate(self, writer: &mut V::$assoc_type_name) -> IonResult<()> {
+                self(writer)
+            }
+        }
+
+        container_fn_trait!($($rest)*);
+    };
+}
+
+container_fn_trait!(
+    ListFn => ListWriter,
+    // SExpFn => SExpWriter,
+    // StructFn => StructWriter,
+    // MacroArgsFn => MacroArgsWriter,
+);
 
 // ===== List =====
-pub trait ListFn<V: ValueWriter>: FnOnce(&mut V::ListWriter) -> IonResult<()> {
-    fn populate(self, writer: &mut V::ListWriter) -> IonResult<()>;
-}
+// pub trait ListFn<V: ValueWriter>: FnOnce(&mut V::ListWriter) -> IonResult<()> {
+//     fn populate(self, writer: &mut V::ListWriter) -> IonResult<()>;
+// }
+//
+// impl<F, V: ValueWriter> ListFn<V> for F
+//     where
+//         F: FnOnce(&mut V::ListWriter) -> IonResult<()>,
+// {
+//     fn populate(self, writer: &mut V::ListWriter) -> IonResult<()> {
+//         self(writer)
+//     }
+// }
 
-impl<F, V: ValueWriter> ListFn<V> for F
-    where
-        F: FnOnce(&mut V::ListWriter) -> IonResult<()>,
-{
-    fn populate(self, writer: &mut V::ListWriter) -> IonResult<()> {
-        self(writer)
-    }
-}
-
-// ===== SExp =====
-
-pub trait SExpFn<V: ValueWriter>: FnOnce(&mut V::SExpWriter) -> IonResult<()> {
-    fn populate(self, writer: &mut V::SExpWriter) -> IonResult<()>;
-}
-
-impl<F, V: ValueWriter> SExpFn<V> for F
-    where
-        F: FnOnce(&mut V::SExpWriter) -> IonResult<()>,
-{
-    fn populate(self, writer: &mut V::SExpWriter) -> IonResult<()> {
-        self(writer)
-    }
-}
+// // ===== SExp =====
+//
+// pub trait SExpFn<V: ValueWriter>: FnOnce(&mut V::SExpWriter) -> IonResult<()> {
+//     fn populate(self, writer: &mut V::SExpWriter) -> IonResult<()>;
+// }
+//
+// impl<F, V: ValueWriter> SExpFn<V> for F
+//     where
+//         F: FnOnce(&mut V::SExpWriter) -> IonResult<()>,
+// {
+//     fn populate(self, writer: &mut V::SExpWriter) -> IonResult<()> {
+//         self(writer)
+//     }
+// }
+//
+// // ===== Struct =====
+//
+// pub trait SExpFn<V: ValueWriter>: FnOnce(&mut V::SExpWriter) -> IonResult<()> {
+//     fn populate(self, writer: &mut V::SExpWriter) -> IonResult<()>;
+// }
+//
+// impl<F, V: ValueWriter> crate::lazy::encoder::foo::SExpFn<V> for F
+//     where
+//         F: FnOnce(&mut V::SExpWriter) -> IonResult<()>,
+// {
+//     fn populate(self, writer: &mut V::SExpWriter) -> IonResult<()> {
+//         self(writer)
+//     }
+// }
 
 trait Foo {
     fn foo(self) -> Result<(), ()>;

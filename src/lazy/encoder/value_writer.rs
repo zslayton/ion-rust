@@ -78,7 +78,7 @@ pub trait ValueWriter: Sized {
     fn write_clob(self, value: impl AsRef<[u8]>) -> IonResult<()>;
     fn write_blob(self, value: impl AsRef<[u8]>) -> IonResult<()>;
 
-    fn write_list(self, list_fn: impl SExpFn<Self>) -> IonResult<()>;
+    fn write_list(self, list_fn: impl ListFn<Self>) -> IonResult<()>;
 
     fn write_sexp<F: for<'a> FnOnce(&mut Self::SExpWriter<'a>) -> IonResult<()>>(
         self,
@@ -172,7 +172,7 @@ macro_rules! delegate_value_writer_to {
                 fn write_symbol(self, value: impl AsRawSymbolTokenRef) -> IonResult<()>;
                 fn write_clob(self, value: impl AsRef<[u8]>) -> IonResult<()>;
                 fn write_blob(self, value: impl AsRef<[u8]>) -> IonResult<()>;
-                fn write_list(self, list_fn: impl ListFn<Self>) -> IonResult<()>;
+                fn write_list(self, list_fn: impl $crate::lazy::encoder::container_fn::ListFn<Self>) -> IonResult<()>;
                 fn write_sexp<F: for<'a> FnOnce(&mut Self::SExpWriter<'a>) -> IonResult<()>>(
                     self,
                     sexp_fn: F,
@@ -205,9 +205,9 @@ macro_rules! delegate_value_writer_to_self {
     };
 }
 
-use crate::lazy::encoder::foo::SExpFn;
 pub(crate) use delegate_value_writer_to;
 pub(crate) use delegate_value_writer_to_self;
+use crate::lazy::encoder::container_fn::ListFn;
 
 impl<V> ValueWriter for V
 where

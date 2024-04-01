@@ -34,7 +34,7 @@ impl Hash for SymbolText {
         match self {
             SymbolText::Shared(text) => text.hash(state),
             SymbolText::Owned(text) => text.hash(state),
-            SymbolText::Unknown => 0.hash(state),
+            SymbolText::Unknown => "".hash(state),
         }
     }
 }
@@ -203,8 +203,9 @@ impl PartialEq<Symbol> for &str {
 // in order to allow a HashMap<Symbol, _> to do lookups with a &str instead of a &Symbol
 impl Borrow<str> for Symbol {
     fn borrow(&self) -> &str {
-        self.text()
-            .expect("cannot borrow a &str from a Symbol with unknown text")
+        // TODO: Explain why this choice is arbitrary and harmless
+        self.text().unwrap_or("$0")
+            // .expect("cannot borrow a &str from a Symbol with unknown text")
     }
 }
 

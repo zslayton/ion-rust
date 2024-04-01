@@ -249,7 +249,7 @@ impl WriteAsIonValue for Value {
             Value::String(s) => value_writer.write_string(s),
             Value::Clob(c) => value_writer.write_clob(c),
             Value::Blob(b) => value_writer.write_blob(b),
-            Value::List(l) => value_writer.write_list(|list: &mut V::ListWriter| {
+            Value::List(l) => value_writer.write_list(|list| {
                 for value in l {
                     list.write(value)?;
                 }

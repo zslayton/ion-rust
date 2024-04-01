@@ -14,7 +14,6 @@ use crate::lazy::encoder::binary::v1_1::container_writers::{
 use crate::lazy::encoder::binary::v1_1::fixed_int::FixedInt;
 use crate::lazy::encoder::binary::v1_1::fixed_uint::FixedUInt;
 use crate::lazy::encoder::binary::v1_1::flex_sym::FlexSym;
-use crate::lazy::encoder::foo::SExpFn;
 use crate::lazy::encoder::private::Sealed;
 use crate::lazy::encoder::value_writer::internal::MakeValueWriter;
 use crate::lazy::encoder::value_writer::{
@@ -27,6 +26,7 @@ use crate::types::integer::IntData;
 use crate::{
     Decimal, FlexInt, FlexUInt, Int, IonResult, IonType, RawSymbolTokenRef, SymbolId, Timestamp,
 };
+use crate::lazy::encoder::container_fn::ListFn;
 
 /// The initial size of the bump-allocated buffer created to hold a container's child elements.
 // This number was chosen somewhat arbitrarily and can be updated as needed.
@@ -582,7 +582,7 @@ impl<'value, 'top> BinaryValueWriter_1_1<'value, 'top> {
 
     fn write_list(
         self,
-        list_fn: impl SExpFn<Self>,
+        list_fn: impl ListFn<Self>,
     ) -> IonResult<()> {
         if self.delimited_containers {
             return self.write_delimited_list(list_fn);
@@ -592,7 +592,7 @@ impl<'value, 'top> BinaryValueWriter_1_1<'value, 'top> {
 
     fn write_length_prefixed_list(
         mut self,
-        list_fn: impl SExpFn<Self>,
+        list_fn: impl ListFn<Self>,
     ) -> IonResult<()> {
         // We're writing a length-prefixed list, so we need to set up a space to encode the list's children.
         let child_encoding_buffer = self.allocator.alloc_with(|| {
@@ -623,7 +623,7 @@ impl<'value, 'top> BinaryValueWriter_1_1<'value, 'top> {
 
     fn write_delimited_list(
         mut self,
-        list_fn: impl SExpFn<Self>,
+        list_fn: impl ListFn<Self>,
     ) -> IonResult<()> {
         let child_encoding_buffer = self.encoding_buffer;
         let container_writer =
@@ -856,36 +856,36 @@ pub struct BinaryAnnotatedValueWriter_1_1<'value, 'top, SymbolType: AsRawSymbolT
 impl<'value, 'top, SymbolType: AsRawSymbolTokenRef>
     BinaryAnnotatedValueWriter_1_1<'value, 'top, SymbolType>
 {
-    // fn encode_annotated<F>(mut self, encode_value_fn: F) -> IonResult<()>
-    // where
-    //     F: for<'a> FnOnce(BinaryValueWriter_1_1<'value, 'top>) -> IonResult<()>,
-    // {
-    //     // TODO: With some extra analysis, we could determine whether FlexUInt annotation encodings
-    //     //       were sufficient. These are potentially slightly more compact, but cannot encode
-    //     //       inline text or `$0`. For now, we simply use FlexSym encoding.
-    //     match self.annotations {
-    //         [] => {
-    //             // There are no annotations; nothing to do.
-    //         }
-    //         [a] => {
-    //             // Opcode 0xE7: A single FlexSym annotation follows
-    //             self.buffer.push(0xE7);
-    //             FlexSym::encode_symbol(self.buffer, a);
-    //         }
-    //         [a1, a2] => {
-    //             // Opcode 0xE8: Two FlexSym annotations follow
-    //             self.buffer.push(0xE8);
-    //             FlexSym::encode_symbol(self.buffer, a1);
-    //             FlexSym::encode_symbol(self.buffer, a2);
-    //         }
-    //         _ => {
-    //             self.write_length_prefixed_flex_sym_annotation_sequence();
-    //         }
-    //     }
-    //     // We've encoded the annotations, now create a no-annotations ValueWriter to encode the value itself.
-    //     let value_writer = BinaryValueWriter_1_1::new(self.allocator, self.buffer);
-    //     encode_value_fn(value_writer)
-    // }
+    fn encode_annotated<F>(mut self, encode_value_fn: F) -> IonResult<()>
+    where
+        F: for<'a> FnOnce(BinaryValueWriter_1_1<'value, 'top>) -> IonResult<()>,
+    {
+        // TODO: With some extra analysis, we could determine whether FlexUInt annotation encodings
+        //       were sufficient. These are potentially slightly more compact, but cannot encode
+        //       inline text or `$0`. For now, we simply use FlexSym encoding.
+        match self.annotations {
+            [] => {
+                // There are no annotations; nothing to do.
+            }
+            [a] => {
+                // Opcode 0xE7: A single FlexSym annotation follows
+                self.buffer.push(0xE7);
+                FlexSym::encode_symbol(self.buffer, a);
+            }
+            [a1, a2] => {
+                // Opcode 0xE8: Two FlexSym annotations follow
+                self.buffer.push(0xE8);
+                FlexSym::encode_symbol(self.buffer, a1);
+                FlexSym::encode_symbol(self.buffer, a2);
+            }
+            _ => {
+                self.write_length_prefixed_flex_sym_annotation_sequence();
+            }
+        }
+        // We've encoded the annotations, now create a no-annotations ValueWriter to encode the value itself.
+        let value_writer = BinaryValueWriter_1_1::new(self.allocator, self.buffer);
+        encode_value_fn(value_writer)
+    }
 
     fn write_flex_sym_annotation(
         buffer: &mut BumpVec<'top, u8>,
@@ -939,10 +939,11 @@ impl<'value, 'top, SymbolType: AsRawSymbolTokenRef> ValueWriter
     );
 
     // fn write_list(self, list_fn: impl for<'a> WriteSequenceFn<Self::ListWriter>) -> IonResult<()> {
-    fn write_list(self, list_fn: impl SExpFn<Self>) -> IonResult<()> {
-        todo!()
-        // self.encode_annotated(|value_writer| value_writer.write_list(list_fn))
+    fn write_list(self, list_fn: impl ListFn<Self>) -> IonResult<()> {
+        self.encode_annotated(|value_writer| value_writer.write_list(list_fn))
     }
+
+    // TODO: Unit tests for writing encoded containers
     fn write_sexp<F: for<'a> FnOnce(&mut Self::SExpWriter<'a>) -> IonResult<()>>(
         self,
         sexp_fn: F,
