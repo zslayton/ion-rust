@@ -1,8 +1,7 @@
 #![cfg(feature = "experimental-reader")]
 #![cfg(feature = "experimental-writer")]
 use crate::ion_tests::contains_path;
-use ion_rs::IonData;
-use ion_rs::{Element, IonResult, Sequence};
+use ion_rs::{Element, ElementWriter, IonResult, IonWriter, Sequence, TextWriterBuilder};
 use std::fs::read;
 use test_generator::test_resources;
 
@@ -42,7 +41,14 @@ fn test_to_string(file_name: &str) {
     });
 
     for element in elements {
-        let roundtripped = Element::read_one(element.to_string()).unwrap();
-        assert!(IonData::eq(&element, &roundtripped))
+        let mut buffer = Vec::with_capacity(2048);
+        let mut writer = TextWriterBuilder::default().build(&mut buffer).unwrap();
+        writer.write_element(&element).unwrap();
+        writer.flush().unwrap();
+        drop(writer);
+
+        let expected_string = std::str::from_utf8(buffer.as_slice()).unwrap().to_string();
+
+        assert_eq!(element.to_string(), expected_string);
     }
 }

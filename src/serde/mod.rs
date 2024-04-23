@@ -66,6 +66,7 @@
 //!
 //! fn main() -> IonResult<()> {
 //!     // data structure for representing address
+//!     use ion_rs::{Element, ion_struct};
 //!     let address = Address {
 //!         street: "10 Downing Street".to_owned(),
 //!         city: "London".to_owned(),

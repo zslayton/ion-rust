@@ -5,7 +5,7 @@ use crate::lazy::encoder::value_writer::SequenceWriter;
 use crate::lazy::encoder::write_as_ion::WriteAsIon;
 use crate::lazy::encoder::{LazyEncoder, LazyRawWriter, SymbolCreationPolicy};
 use crate::lazy::encoding::{Encoding, TextEncoding_1_0};
-use crate::text::whitespace_config::{
+use crate::text::raw_text_writer::{
     WhitespaceConfig, COMPACT_WHITESPACE_CONFIG, LINES_WHITESPACE_CONFIG, PRETTY_WHITESPACE_CONFIG,
 };
 use crate::types::ParentType;

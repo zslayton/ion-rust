@@ -96,11 +96,6 @@ impl<E: LazyEncoder, Output: Write> ApplicationWriter<E, Output> {
         Ok(())
     }
 
-    fn close(mut self) -> IonResult<Output> {
-        self.flush()?;
-        Ok(self.output)
-    }
-
     /// Helper method to encode an LST append containing pending symbols.
     fn write_lst_append(&mut self) -> IonResult<()> {
         let Self {
@@ -493,7 +488,7 @@ impl<'value, V: ValueWriter> EExpWriter for ApplicationEExpWriter<'value, V> {
     // Default methods
 }
 
-impl<S: SequenceWriter> ElementWriter for S {
+impl<E: LazyEncoder, O: Write> ElementWriter for ApplicationWriter<E, O> {
     fn write_value(&mut self, value: &Value) -> IonResult<()> {
         self.write(value)?;
         Ok(())
