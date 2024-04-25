@@ -120,7 +120,7 @@ pub(crate) struct TextBufferView<'top> {
     //                          offset: 6
     data: &'top [u8],
     offset: usize,
-    allocator: &'top BumpAllocator,
+    pub(crate) allocator: &'top BumpAllocator,
 }
 
 impl<'a> PartialEq for TextBufferView<'a> {
@@ -469,7 +469,7 @@ impl<'top> TextBufferView<'top> {
                     field_name.span().start - self.offset(),
                     field_name.span().len(),
                 );
-                let name = match field_name.read(name_bytes) {
+                let name = match field_name.read(self.allocator, name_bytes) {
                     Ok(name) => name,
                     Err(e) => {
                         let error = InvalidInputError::new(name_bytes).with_description(format!(

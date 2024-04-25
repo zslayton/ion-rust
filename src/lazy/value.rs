@@ -1,5 +1,3 @@
-use std::borrow::Cow;
-
 use crate::lazy::decoder::LazyDecoder;
 use crate::lazy::encoding::BinaryEncoding_1_0;
 use crate::lazy::expanded::{ExpandedAnnotationsIterator, ExpandedValueRef, LazyExpandedValue};
@@ -212,8 +210,7 @@ impl<'top, D: LazyDecoder> LazyValue<'top, D> {
                             ))
                         })?
                         .into(),
-                    RawSymbolTokenRef::Text(Cow::Borrowed(text)) => text.into(),
-                    RawSymbolTokenRef::Text(Cow::Owned(text)) => text.into(),
+                    RawSymbolTokenRef::Text(text) => text.into(),
                 };
                 ValueRef::Symbol(symbol)
             }

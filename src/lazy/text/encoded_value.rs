@@ -1,9 +1,10 @@
 use crate::lazy::encoding::TextEncoding;
 use crate::lazy::text::buffer::TextBufferView;
 use crate::lazy::text::matched::{MatchedFieldNameSyntax, MatchedValue};
-use crate::result::IonFailure;
 use crate::{IonResult, IonType, RawSymbolTokenRef};
 use std::ops::Range;
+
+use bumpalo::Bump as BumpAllocator;
 
 /// Represents the type, offset, and length metadata of the various components of an encoded value
 /// in a text input stream.
@@ -160,17 +161,16 @@ impl<'top, E: TextEncoding<'top>> EncodedTextValue<'top, E> {
 
     pub fn field_name<'data>(
         &self,
+        allocator: &'data BumpAllocator,
         input: TextBufferView<'data>,
     ) -> IonResult<RawSymbolTokenRef<'data>> {
         if let Some(field_name_syntax) = self.field_name_syntax() {
             let relative_start =
                 self.data_offset - input.offset() - (self.field_name_offset as usize);
             let field_name_bytes = input.slice(relative_start, self.field_name_length as usize);
-            field_name_syntax.read(field_name_bytes)
+            field_name_syntax.read(allocator, field_name_bytes)
         } else {
-            IonResult::illegal_operation(
-                "requested field name, but value was not in a struct field",
-            )
+            unreachable!("requested field name, but value was not in a struct field",)
         }
     }
 

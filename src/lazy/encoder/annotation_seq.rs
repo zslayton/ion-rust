@@ -17,7 +17,7 @@ impl<'a> AnnotationSeq<'a> for &'a str {
     /// Converts the value into an `AnnotationsVec`.
     fn into_annotations_vec(self) -> AnnotationsVec<'a> {
         let mut vec = AnnotationsVec::new();
-        vec.push(RawSymbolTokenRef::Text(self.into()));
+        vec.push(RawSymbolTokenRef::Text(self));
         vec
     }
 }
@@ -25,7 +25,7 @@ impl<'a> AnnotationSeq<'a> for &'a str {
 impl<'a> AnnotationSeq<'a> for &'a &str {
     fn into_annotations_vec(self) -> AnnotationsVec<'a> {
         let mut vec = AnnotationsVec::new();
-        vec.push(RawSymbolTokenRef::Text((*self).into()));
+        vec.push(RawSymbolTokenRef::Text(self));
         vec
     }
 }

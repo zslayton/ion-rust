@@ -33,7 +33,7 @@ impl<'top, D: LazyDecoder> LazyExpandedField<'top, D> {
     /// Returns the symbol token that was used to encode the field name. This may be either text
     /// or a symbol ID whose text resides in the symbol table.
     pub fn raw_name(&self) -> RawSymbolTokenRef<'top> {
-        self.name.clone()
+        self.name
     }
 
     /// Attempts to resolve the field name and return it as a [`SymbolRef`].
@@ -415,10 +415,7 @@ impl<'top, D: LazyDecoder> ExpandedStructIterator<'top, D> {
                         Ok(Some(next_value)) => {
                             // We got another value from the macro we're evaluating. Emit
                             // it as another field using the same field_name.
-                            return Some(Ok(LazyExpandedField::new(
-                                field_name.clone(),
-                                next_value,
-                            )));
+                            return Some(Ok(LazyExpandedField::new(*field_name, next_value)));
                         }
                         Ok(None) => {
                             // The macro in the value position is no longer emitting values. Switch

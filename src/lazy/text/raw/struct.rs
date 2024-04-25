@@ -99,24 +99,21 @@ impl<'top> LazyRawTextField_1_0<'top> {
     }
 
     pub fn name(&self) -> RawSymbolTokenRef<'top> {
+        let encoded_value = self.value.matched.encoded_value;
+        let matched = &self.value.matched;
+        let allocator = matched.input.allocator;
         // We're in a struct field, the field name _must_ be populated.
         // If it's not (or the field name is not a valid SID or UTF-8 string despite matching),
         // that's a bug. We can safely unwrap/expect here.
-        let matched_symbol = self
-            .value
-            .matched
-            .encoded_value
+        let matched_symbol = encoded_value
             .field_name_syntax()
             .expect("field name syntax not available");
-        let name_length = self
-            .value
-            .matched
-            .encoded_value
+        let name_length = encoded_value
             .field_name_range()
             .expect("field name length not available")
             .len();
         matched_symbol
-            .read(self.value.matched.input.slice(0, name_length))
+            .read(allocator, matched.input.slice(0, name_length))
             .expect("invalid struct field name")
     }
 
@@ -277,7 +274,7 @@ mod tests {
                 .expect_value()?
                 .read()?
                 .expect_struct()?;
-            for (field_result, range) in struct_.iter().zip(field_name_ranges.iter()) {
+            for (_field_result, _range) in struct_.iter().zip(field_name_ranges.iter()) {
                 // let = field_result?.expect_name_value()?;
                 // assert_eq!(field.na)
                 todo!()

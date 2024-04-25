@@ -72,12 +72,12 @@ pub(crate) fn write_symbol_token<O: Write, A: AsRawSymbolTokenRef>(
     match token.as_raw_symbol_token_ref() {
         RawSymbolTokenRef::SymbolId(sid) => write!(output, "${sid}")?,
         RawSymbolTokenRef::Text(text)
-            if token_is_keyword(text.as_ref()) || token_resembles_symbol_id(text.as_ref()) =>
+            if token_is_keyword(text) || token_resembles_symbol_id(text) =>
         {
             // Write the symbol text in single quotes
             write!(output, "'{text}'")?;
         }
-        RawSymbolTokenRef::Text(text) if token_is_identifier(text.as_ref()) => {
+        RawSymbolTokenRef::Text(text) if token_is_identifier(text) => {
             // Write the symbol text without quotes
             write!(output, "{text}")?
         }
@@ -198,7 +198,7 @@ impl<'value, W: Write> TextAnnotatedValueWriter_1_0<'value, W> {
         for annotation in self.annotations {
             match annotation.as_raw_symbol_token_ref() {
                 RawSymbolTokenRef::Text(token) => {
-                    write_symbol_token(output, token.as_ref())?;
+                    write_symbol_token(output, token)?;
                     write!(output, "::")
                 }
                 RawSymbolTokenRef::SymbolId(sid) => write!(output, "${sid}::"),

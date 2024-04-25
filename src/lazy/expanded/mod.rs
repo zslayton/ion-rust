@@ -750,7 +750,7 @@ impl<'top, Encoding: LazyDecoder> ExpandedValueRef<'top, Encoding> {
 
     pub fn expect_symbol(self) -> IonResult<RawSymbolTokenRef<'top>> {
         if let ExpandedValueRef::Symbol(s) = self {
-            Ok(s.clone())
+            Ok(s)
         } else {
             self.expected("symbol")
         }

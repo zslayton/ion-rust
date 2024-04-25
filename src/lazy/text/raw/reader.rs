@@ -373,25 +373,19 @@ mod tests {
         // "\"Hello,\\\n world!\" "
         reader.expect_next(RawValueRef::String("Hello, world!".into()));
         // 'foo'
-        reader.expect_next(RawValueRef::Symbol(RawSymbolTokenRef::Text("foo".into())));
+        reader.expect_next(RawValueRef::Symbol(RawSymbolTokenRef::Text("foo")));
         reader.expect_next(RawValueRef::Symbol(RawSymbolTokenRef::Text(
-            "Hello, world!".into(),
+            "Hello, world!",
         )));
-        reader.expect_next(RawValueRef::Symbol(RawSymbolTokenRef::Text(
-            "😎😎😎".into(),
-        )));
+        reader.expect_next(RawValueRef::Symbol(RawSymbolTokenRef::Text("😎😎😎")));
         // firstName
-        reader.expect_next(RawValueRef::Symbol(RawSymbolTokenRef::Text(
-            "firstName".into(),
-        )));
+        reader.expect_next(RawValueRef::Symbol(RawSymbolTokenRef::Text("firstName")));
         // date_of_birth
         reader.expect_next(RawValueRef::Symbol(RawSymbolTokenRef::Text(
-            "date_of_birth".into(),
+            "date_of_birth",
         )));
         // $variable
-        reader.expect_next(RawValueRef::Symbol(RawSymbolTokenRef::Text(
-            "$variable".into(),
-        )));
+        reader.expect_next(RawValueRef::Symbol(RawSymbolTokenRef::Text("$variable")));
         // $0
         reader.expect_next(RawValueRef::Symbol(RawSymbolTokenRef::SymbolId(0)));
         // $10
@@ -461,18 +455,9 @@ mod tests {
         let value = reader.next()?.expect_value()?;
         assert_eq!(value.read()?.expect_i64()?, 42);
         let mut annotations = value.annotations();
-        assert_eq!(
-            annotations.next().unwrap()?,
-            RawSymbolTokenRef::Text("foo".into())
-        );
-        assert_eq!(
-            annotations.next().unwrap()?,
-            RawSymbolTokenRef::Text("bar".into())
-        );
-        assert_eq!(
-            annotations.next().unwrap()?,
-            RawSymbolTokenRef::Text("baz".into())
-        );
+        assert_eq!(annotations.next().unwrap()?, RawSymbolTokenRef::Text("foo"));
+        assert_eq!(annotations.next().unwrap()?, RawSymbolTokenRef::Text("bar"));
+        assert_eq!(annotations.next().unwrap()?, RawSymbolTokenRef::Text("baz"));
 
         Ok(())
     }

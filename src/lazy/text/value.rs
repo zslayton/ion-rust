@@ -14,14 +14,13 @@ use crate::{IonResult, IonType, RawSymbolTokenRef};
 
 /// A value that has been identified in the text input stream but whose data has not yet been read.
 ///
-/// If only part of the value is in the input buffer, calls to [`MatchedRawTextValue::read`] (which examines
-/// bytes beyond the value's header) may return [`IonError::Incomplete`](crate::result::IonError::Incomplete).
-///
 /// `LazyRawTextValue`s are "unresolved," which is to say that symbol values, annotations, and
 /// struct field names may or may not include a text definition. (This is less common in Ion's text
 /// format than in its binary format, but is still possible.) For a resolved lazy value that
 /// includes a text definition for these items whenever one exists, see
 /// [`crate::lazy::value::LazyValue`].
+// This type is version agnostic, and is wrapped by the LazyRawValue implementations for all
+// existing encodings.
 #[derive(Copy, Clone)]
 pub struct MatchedRawTextValue<'top, E: TextEncoding<'top>> {
     pub(crate) encoded_value: EncodedTextValue<'top, E>,
@@ -85,7 +84,8 @@ impl<'top, E: TextEncoding<'top>> LazyRawValuePrivate<'top> for MatchedRawTextVa
     // TODO: We likely want to move this functionality to the Ion-version-specific LazyDecoder::Field
     //       implementations. See: https://github.com/amazon-ion/ion-rust/issues/631
     fn field_name(&self) -> IonResult<RawSymbolTokenRef<'top>> {
-        self.encoded_value.field_name(self.input)
+        self.encoded_value
+            .field_name(self.input.allocator, self.input)
     }
 }
 
@@ -119,6 +119,8 @@ impl<'top, E: TextEncoding<'top>> LazyRawValue<'top, E> for MatchedRawTextValue<
             self.encoded_value.data_length(),
         );
 
+        let allocator = self.input.allocator;
+
         use crate::lazy::text::matched::MatchedValue::*;
         let value_ref = match self.encoded_value.matched() {
             Null(ion_type) => RawValueRef::Null(ion_type),
@@ -127,10 +129,10 @@ impl<'top, E: TextEncoding<'top>> LazyRawValue<'top, E> for MatchedRawTextValue<
             Float(f) => RawValueRef::Float(f.read(matched_input)?),
             Decimal(d) => RawValueRef::Decimal(d.read(matched_input)?),
             Timestamp(t) => RawValueRef::Timestamp(t.read(matched_input)?),
-            String(s) => RawValueRef::String(s.read(matched_input)?),
-            Symbol(s) => RawValueRef::Symbol(s.read(matched_input)?),
-            Blob(b) => RawValueRef::Blob(b.read(matched_input)?),
-            Clob(c) => RawValueRef::Clob(c.read(matched_input)?),
+            String(s) => RawValueRef::String(s.read(allocator, matched_input)?),
+            Symbol(s) => RawValueRef::Symbol(s.read(allocator, matched_input)?),
+            Blob(b) => RawValueRef::Blob(b.read(allocator, matched_input)?),
+            Clob(c) => RawValueRef::Clob(c.read(allocator, matched_input)?),
             List(_) => RawValueRef::List(E::List::<'top>::from_value(E::value_from_matched(*self))),
             SExp(_) => RawValueRef::SExp(E::SExp::<'top>::from_value(E::value_from_matched(*self))),
             Struct(_) => RawValueRef::Struct(E::Struct::from_value(E::value_from_matched(*self))),
@@ -213,7 +215,7 @@ impl<'top> Iterator for RawTextAnnotationsIterator<'top> {
         let matched_input = self
             .input
             .slice(span.start - self.input.offset(), span.len());
-        let text = match symbol.read(matched_input) {
+        let text = match symbol.read(self.input.allocator, matched_input) {
             Ok(text) => text,
             Err(e) => {
                 self.has_returned_error = true;
@@ -239,9 +241,9 @@ mod tests {
             let allocator = BumpAllocator::new();
             let input = TextBufferView::new(&allocator, input.as_bytes());
             let mut iter = RawTextAnnotationsIterator::new(input);
-            assert_eq!(iter.next().unwrap()?, RawSymbolTokenRef::Text("foo".into()));
-            assert_eq!(iter.next().unwrap()?, RawSymbolTokenRef::Text("bar".into()));
-            assert_eq!(iter.next().unwrap()?, RawSymbolTokenRef::Text("baz".into()));
+            assert_eq!(iter.next().unwrap()?, RawSymbolTokenRef::Text("foo"));
+            assert_eq!(iter.next().unwrap()?, RawSymbolTokenRef::Text("bar"));
+            assert_eq!(iter.next().unwrap()?, RawSymbolTokenRef::Text("baz"));
             Ok(())
         }
         test("foo::bar::baz::")?;
