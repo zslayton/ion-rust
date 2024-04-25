@@ -353,7 +353,7 @@ impl<'top, D: LazyDecoder> Iterator for TemplateStructRawFieldsIterator<'top, D>
             }
         };
         self.index += 2;
-        Some(Ok(RawFieldExpr::NameValuePair(name_token, value_source)))
+        Some(Ok(RawFieldExpr::new(name_token, value_source)))
     }
 }
 

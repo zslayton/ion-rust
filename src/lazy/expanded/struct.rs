@@ -320,24 +320,22 @@ impl<'top, D: LazyDecoder> Iterator for ExpandedStructIterator<'top, D> {
                 Self::next_field_from(context, state, tdl_macro_evaluator, template_iterator)
             }
             ExpandedStructIteratorSource::ValueLiteral(e_exp_evaluator, raw_struct_iter) => {
-                let mut iter_adapter = raw_struct_iter.map(
-                    |field: IonResult<LazyRawFieldExpr<'top, D>>| match field? {
-                        RawFieldExpr::NameValuePair(name, RawValueExpr::MacroInvocation(m)) => {
-                            let resolved_invocation = m.resolve(context)?;
-                            Ok(RawFieldExpr::NameValuePair(
-                                name,
-                                RawValueExpr::MacroInvocation(resolved_invocation.into()),
-                            ))
+                let mut iter_adapter =
+                    raw_struct_iter.map(|field: IonResult<LazyRawFieldExpr<'top, D>>| {
+                        let (name, value_expr) = field?.into_name_value();
+                        match value_expr {
+                            RawValueExpr::MacroInvocation(m) => {
+                                let resolved_invocation = m.resolve(context)?;
+                                Ok(RawFieldExpr::new(
+                                    name,
+                                    RawValueExpr::MacroInvocation(resolved_invocation.into()),
+                                ))
+                            }
+                            RawValueExpr::ValueLiteral(value) => {
+                                Ok(RawFieldExpr::new(name, RawValueExpr::ValueLiteral(value)))
+                            }
                         }
-                        RawFieldExpr::NameValuePair(name, RawValueExpr::ValueLiteral(value)) => Ok(
-                            RawFieldExpr::NameValuePair(name, RawValueExpr::ValueLiteral(value)),
-                        ),
-                        RawFieldExpr::MacroInvocation(invocation) => {
-                            let resolved_invocation = invocation.resolve(context)?;
-                            Ok(RawFieldExpr::MacroInvocation(resolved_invocation.into()))
-                        }
-                    },
-                );
+                    });
                 Self::next_field_from(context, state, e_exp_evaluator, &mut iter_adapter)
             }
         }
@@ -364,7 +362,7 @@ impl<'top, D: LazyDecoder> ExpandedStructIterator<'top, D> {
         // We have an iterator (see `I` below) that gives us raw fields from an input struct.
         // This type, `V`, is the type of value in that raw field. For example: `LazyRawTextValue_1_1`
         // when reading text Ion 1.1, or `&'top Element` when evaluating a TDL macro.
-        V: Into<ExpandedValueSource<'top, D>>,
+        V: Into<ExpandedValueSource<'top, D>> + Copy,
         // An iterator over the struct we're expanding. It may be the fields iterator from a
         // LazyRawStruct, or it could be a `TemplateStructRawFieldsIterator`.
         I: Iterator<Item = IonResult<RawFieldExpr<'name, V, MacroExpr<'top, D>>>>,
@@ -439,7 +437,7 @@ impl<'top, D: LazyDecoder> ExpandedStructIterator<'top, D> {
         // These generics are all carried over from the function above.
         'a,
         'name: 'top,
-        V: Into<ExpandedValueSource<'top, D>>,
+        V: Into<ExpandedValueSource<'top, D>> + Copy,
         I: Iterator<Item = IonResult<RawFieldExpr<'name, V, MacroExpr<'top, D>>>>,
     >(
         context: EncodingContext<'top>,
@@ -453,25 +451,27 @@ impl<'top, D: LazyDecoder> ExpandedStructIterator<'top, D> {
         use ControlFlow::*;
 
         // If the iterator is empty, we're done.
-        let field_expr_result = match iter.next() {
-            Some(result) => result,
+        let field_expr = match iter.next() {
+            Some(Ok(field_expr)) => field_expr,
+            Some(Err(error)) => {
+                return Break(Some(Err::<LazyExpandedField<'top, D>, IonError>(error)))
+            }
             None => return Break(None),
         };
 
-        return match field_expr_result {
-            Err(e) => Break(Some(Err::<LazyExpandedField<'top, D>, IonError>(e))),
+        let (name, value) = field_expr.into_name_value();
+
+        return match value {
             // Plain (name, value literal) pair. For example: `foo: 1`
-            Ok(RawFieldExpr::NameValuePair(name, RawValueExpr::ValueLiteral(value))) => {
-                Break(Some(Ok(LazyExpandedField::new(
-                    name,
-                    LazyExpandedValue {
-                        context,
-                        source: value.into(),
-                    },
-                ))))
-            }
+            RawValueExpr::ValueLiteral(value) => Break(Some(Ok(LazyExpandedField::new(
+                name,
+                LazyExpandedValue {
+                    context,
+                    source: value.into(),
+                },
+            )))),
             // (name, macro invocation) pair. For example: `foo: (:bar)`
-            Ok(RawFieldExpr::NameValuePair(name, RawValueExpr::MacroInvocation(invocation))) => {
+            RawValueExpr::MacroInvocation(invocation) => {
                 if let Err(e) = evaluator.push(invocation) {
                     return Break(Some(Err(e)));
                 };
@@ -479,21 +479,6 @@ impl<'top, D: LazyDecoder> ExpandedStructIterator<'top, D> {
                 // We've pushed the macro invocation onto the evaluator's stack, but further evaluation
                 // is needed to get our next field.
                 Continue(())
-            }
-            // Macro invocation in field name position.
-            Ok(RawFieldExpr::MacroInvocation(invocation)) => {
-                // The next expression from the iterator was a macro. We expect it to expand to a
-                // single struct whose fields will be merged into the one we're iterating over. For example:
-                //     {a: 1, (:make_struct b 2 c 3), d: 4}
-                // expands to:
-                //     {a: 1, b: 2, c: 3, d: 4}
-                match Self::begin_inlining_struct_from_macro(state, evaluator, invocation) {
-                    // If the macro expanded to a struct as expected, continue the evaluation
-                    // until we get a field to return.
-                    Ok(_) => Continue(()),
-                    // If something went wrong, surface the error.
-                    Err(e) => Break(Some(Err(e))),
-                }
             }
         };
     }

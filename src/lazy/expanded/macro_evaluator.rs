@@ -1116,10 +1116,6 @@ mod tests {
                 
                 f: 5,
                 
-                // If a macro appears in field name position, it MUST produce a single struct (which
-                // may be empty). That struct's fields will be merged into the host struct.  
-                (:values {g: 6, h: 7}),
-                
                 g: 8
             }
             "#,
@@ -1132,8 +1128,6 @@ mod tests {
                 // no 'd',
                 e: "foobarbaz",
                 f: 5,
-                g: 6,
-                h: 7,
                 g: 8
             }
             "#,

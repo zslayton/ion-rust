@@ -9,7 +9,7 @@ use nom::character::streaming::satisfy;
 use crate::lazy::decoder::private::LazyContainerPrivate;
 use crate::lazy::decoder::{
     LazyDecoder, LazyRawFieldExpr, LazyRawReader, LazyRawSequence, LazyRawStruct, LazyRawValue,
-    LazyRawValueExpr, RawFieldExpr, RawValueExpr,
+    LazyRawValueExpr, RawValueExpr,
 };
 use crate::lazy::encoding::TextEncoding_1_1;
 use crate::lazy::raw_stream_item::{LazyRawStreamItem, RawStreamItem};
@@ -473,18 +473,13 @@ pub struct LazyRawTextStruct_1_1<'top> {
 impl<'a> Debug for LazyRawTextStruct_1_1<'a> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "{{")?;
-        for field in self.iter() {
-            match field? {
-                LazyRawFieldExpr::<TextEncoding_1_1>::NameValuePair(
-                    name,
-                    RawValueExpr::ValueLiteral(value),
-                ) => write!(f, "{name:?}: {value:?}, "),
-                LazyRawFieldExpr::<TextEncoding_1_1>::NameValuePair(
-                    name,
-                    RawValueExpr::MacroInvocation(invocation),
-                ) => write!(f, "{name:?}: {invocation:?}, "),
-                LazyRawFieldExpr::<TextEncoding_1_1>::MacroInvocation(invocation) => {
-                    write!(f, "{invocation:?}, ")
+        for field_result in self.iter() {
+            let field = field_result?;
+            let name = field.name();
+            match field.value_expr() {
+                RawValueExpr::ValueLiteral(value) => write!(f, "{name:?}: {value:?}, "),
+                RawValueExpr::MacroInvocation(invocation) => {
+                    write!(f, "{name:?}: {invocation:?}, ")
                 }
             }?;
         }
@@ -643,16 +638,14 @@ impl<'top> RawTextStructIterator_1_1<'top> {
         let input_after_last = if let Some(field_result) = self.last() {
             // If there are any field expressions, we need to isolate the input slice that follows
             // the last one.
-            use RawFieldExpr::*;
-            match field_result? {
+            match field_result?.value_expr() {
                 // foo: bar
-                NameValuePair(_name, RawValueExpr::ValueLiteral(value)) => {
-                    value.matched.input.slice_to_end(value.matched.encoded_value.total_length())
-                },
+                RawValueExpr::ValueLiteral(value) => value
+                    .matched
+                    .input
+                    .slice_to_end(value.matched.encoded_value.total_length()),
                 // foo: (:bar ...)
-                NameValuePair(_, RawValueExpr::MacroInvocation(invocation))
-                // (:foo)
-                | MacroInvocation(invocation) => {
+                RawValueExpr::MacroInvocation(invocation) => {
                     self.input.slice_to_end(invocation.input.len())
                 }
             }
@@ -714,16 +707,14 @@ impl<'top> TextStructSpanFinder_1_1<'top> {
         let input_after_last = if let Some(field_result) = child_expr_cache.last() {
             // If there are any field expressions, we need to isolate the input slice that follows
             // the last one.
-            use RawFieldExpr::*;
-            match field_result {
+            match field_result.value_expr() {
                 // foo: bar
-                NameValuePair(_name, RawValueExpr::ValueLiteral(value)) => {
-                    value.matched.input.slice_to_end(value.matched.encoded_value.total_length())
-                },
+                RawValueExpr::ValueLiteral(value) => value
+                    .matched
+                    .input
+                    .slice_to_end(value.matched.encoded_value.total_length()),
                 // foo: (:bar ...)
-                NameValuePair(_, RawValueExpr::MacroInvocation(invocation))
-                // (:foo)
-                | MacroInvocation(invocation) => {
+                RawValueExpr::MacroInvocation(invocation) => {
                     self.iterator.input.slice_to_end(invocation.input.len())
                 }
             }

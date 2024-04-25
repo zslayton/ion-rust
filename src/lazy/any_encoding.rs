@@ -991,14 +991,13 @@ impl<'data> From<LazyRawFieldExpr<'data, TextEncoding_1_0>>
     for LazyRawFieldExpr<'data, AnyEncoding>
 {
     fn from(text_field: LazyRawFieldExpr<'data, TextEncoding_1_0>) -> Self {
-        let (name, value) = match text_field {
-            RawFieldExpr::NameValuePair(name, value) => (name, value),
-            RawFieldExpr::MacroInvocation(_) => {
-                unreachable!("macro invocation in Ion 1.0")
-            }
+        let (name, value_expr) = text_field.into_name_value();
+        let RawValueExpr::ValueLiteral(value) = value_expr else {
+            unreachable!("name/e-expr pair in text Ion 1.0 struct")
         };
         // Convert the text-encoded value into an any-encoded value
-        RawFieldExpr::NameValuePair(name, value.into())
+        let value = LazyRawAnyValue::from(value);
+        RawFieldExpr::new(name, RawValueExpr::ValueLiteral(value))
     }
 }
 
@@ -1006,14 +1005,12 @@ impl<'data> From<LazyRawFieldExpr<'data, BinaryEncoding_1_0>>
     for LazyRawFieldExpr<'data, AnyEncoding>
 {
     fn from(binary_field: LazyRawFieldExpr<'data, BinaryEncoding_1_0>) -> Self {
-        let (name, value) = match binary_field {
-            RawFieldExpr::NameValuePair(name, value) => (name, value),
-            RawFieldExpr::MacroInvocation(_) => {
-                unreachable!("macro invocation in Ion 1.0")
-            }
+        let (name, value_expr) = binary_field.into_name_value();
+        let RawValueExpr::ValueLiteral(value) = value_expr else {
+            unreachable!("name/e-expr pair in binary Ion 1.0 struct")
         };
-        // Convert the binary-encoded value into an any-encoded value
-        RawFieldExpr::NameValuePair(name, value.into())
+        // Convert the text-encoded value into an any-encoded value
+        RawFieldExpr::new(name, RawValueExpr::ValueLiteral(value))
     }
 }
 
@@ -1021,16 +1018,14 @@ impl<'data> From<LazyRawFieldExpr<'data, TextEncoding_1_1>>
     for LazyRawFieldExpr<'data, AnyEncoding>
 {
     fn from(text_field: LazyRawFieldExpr<'data, TextEncoding_1_1>) -> Self {
-        use RawFieldExpr::{MacroInvocation as FieldMacroInvocation, NameValuePair};
-        use RawValueExpr::{MacroInvocation as ValueMacroInvocation, ValueLiteral};
-        match text_field {
-            NameValuePair(name, ValueLiteral(value)) => {
-                NameValuePair(name, ValueLiteral(value.into()))
+        let (name, value_expr) = text_field.into_name_value();
+        match value_expr {
+            RawValueExpr::ValueLiteral(value) => {
+                RawFieldExpr::new(name, RawValueExpr::ValueLiteral(value))
             }
-            NameValuePair(name, ValueMacroInvocation(invocation)) => {
-                NameValuePair(name, ValueMacroInvocation(invocation.into()))
+            RawValueExpr::MacroInvocation(eexp) => {
+                RawFieldExpr::new(name, RawValueExpr::MacroInvocation(eexp))
             }
-            FieldMacroInvocation(invocation) => FieldMacroInvocation(invocation.into()),
         }
     }
 }
@@ -1039,14 +1034,12 @@ impl<'data> From<LazyRawFieldExpr<'data, BinaryEncoding_1_1>>
     for LazyRawFieldExpr<'data, AnyEncoding>
 {
     fn from(binary_field: LazyRawFieldExpr<'data, BinaryEncoding_1_1>) -> Self {
-        let (name, value) = match binary_field {
-            RawFieldExpr::NameValuePair(name, value) => (name, value),
-            RawFieldExpr::MacroInvocation(_) => {
-                todo!("macro invocation in Ion 1.1 binary not implemented")
-            }
+        let (name, value_expr) = binary_field.into_name_value();
+        let RawValueExpr::ValueLiteral(value) = value_expr else {
+            todo!("macro invocation in Ion 1.1 binary not implemented")
         };
         // Convert the binary-encoded value into an any-encoded value
-        RawFieldExpr::NameValuePair(name, value.into())
+        RawFieldExpr::new(name, RawValueExpr::ValueLiteral(value))
     }
 }
 

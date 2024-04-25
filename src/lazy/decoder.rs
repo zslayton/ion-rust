@@ -95,9 +95,29 @@ impl<V: Debug, M: Debug> RawValueExpr<V, M> {
 ///   * a name/e-expression pair
 ///   * an e-expression
 #[derive(Clone, Debug)]
-pub enum RawFieldExpr<'top, V, M> {
-    NameValuePair(RawSymbolTokenRef<'top>, RawValueExpr<V, M>),
-    MacroInvocation(M),
+pub struct RawFieldExpr<'top, V: Copy, M: Copy> {
+    name: RawSymbolTokenRef<'top>,
+    value_expr: RawValueExpr<V, M>,
+}
+
+impl<'top, V: Copy, M: Copy> RawFieldExpr<'top, V, M> {
+    pub fn new(name: RawSymbolTokenRef<'top>, value_expr: impl Into<RawValueExpr<V, M>>) -> Self {
+        Self {
+            name,
+            value_expr: value_expr.into(),
+        }
+    }
+
+    pub fn into_name_value(self) -> (RawSymbolTokenRef<'top>, RawValueExpr<V, M>) {
+        (self.name, self.value_expr)
+    }
+
+    pub fn name(&self) -> &RawSymbolTokenRef<'top> {
+        &self.name
+    }
+    pub fn value_expr(&self) -> RawValueExpr<V, M> {
+        self.value_expr
+    }
 }
 
 // As with the `RawValueExpr`/`LazyRawValueExpr` type pair, a `RawFieldExpr` has no constraints
@@ -109,39 +129,25 @@ pub enum RawFieldExpr<'top, V, M> {
 pub type LazyRawFieldExpr<'top, D> =
     RawFieldExpr<'top, <D as LazyDecoder>::Value<'top>, <D as LazyDecoder>::EExpression<'top>>;
 
-impl<'name, V: Debug, M: Debug> RawFieldExpr<'name, V, M> {
+impl<'name, V: Copy + Debug, M: Copy + Debug> RawFieldExpr<'name, V, M> {
     pub fn expect_name_value(self) -> IonResult<(RawSymbolTokenRef<'name>, V)> {
-        match self {
-            RawFieldExpr::NameValuePair(name, RawValueExpr::ValueLiteral(value)) => {
-                Ok((name, value))
-            }
-            _ => IonResult::decoding_error(format!(
+        let RawValueExpr::ValueLiteral(value) = self.value_expr() else {
+            return IonResult::decoding_error(format!(
                 "expected a name/value pair but found {:?}",
                 self
-            )),
-        }
+            ));
+        };
+        Ok((self.into_name_value().0, value))
     }
 
     pub fn expect_name_macro(self) -> IonResult<(RawSymbolTokenRef<'name>, M)> {
-        match self {
-            RawFieldExpr::NameValuePair(name, RawValueExpr::MacroInvocation(invocation)) => {
-                Ok((name, invocation))
-            }
-            _ => IonResult::decoding_error(format!(
+        let RawValueExpr::MacroInvocation(invocation) = self.value_expr() else {
+            return IonResult::decoding_error(format!(
                 "expected a name/macro pair but found {:?}",
                 self
-            )),
-        }
-    }
-
-    pub fn expect_macro(self) -> IonResult<M> {
-        match self {
-            RawFieldExpr::MacroInvocation(invocation) => Ok(invocation),
-            _ => IonResult::decoding_error(format!(
-                "expected a macro invocation but found {:?}",
-                self
-            )),
-        }
+            ));
+        };
+        Ok((self.into_name_value().0, invocation))
     }
 }
 
@@ -211,7 +217,7 @@ pub trait LazyRawReader<'data, D: LazyDecoder>: Sized {
 }
 
 pub trait LazyRawValue<'top, D: LazyDecoder>:
-    private::LazyRawValuePrivate<'top> + Copy + Clone + Debug
+    private::LazyRawValuePrivate<'top> + Copy + Clone + Debug + Sized
 {
     fn ion_type(&self) -> IonType;
     fn is_null(&self) -> bool;

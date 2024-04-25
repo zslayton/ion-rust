@@ -90,7 +90,7 @@ impl<'top> Iterator for RawBinaryStructIterator_1_1<'top> {
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.source.try_parse_next(ImmutableBuffer::peek_field) {
-            Ok(Some(lazy_raw_value)) => Some(Ok(RawFieldExpr::NameValuePair(
+            Ok(Some(lazy_raw_value)) => Some(Ok(RawFieldExpr::new(
                 lazy_raw_value.field_name().unwrap(),
                 RawValueExpr::ValueLiteral(lazy_raw_value),
             ))),

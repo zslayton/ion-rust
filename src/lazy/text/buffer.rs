@@ -461,11 +461,6 @@ impl<'top> TextBufferView<'top> {
         let (input_after_field, field_expr_result) = alt((
             // If the next thing in the input is a `}`, return `None`.
             Self::match_struct_end.map(|_| Ok(None)),
-            terminated(
-                Self::match_e_expression,
-                whitespace_and_then(alt((tag(","), peek(tag("}"))))),
-            )
-            .map(|invocation| Ok(Some(RawFieldExpr::MacroInvocation(invocation)))),
             Self::match_struct_field_name_and_e_expression_1_1.map(|(field_name, invocation)| {
                 // TODO: We're discarding the name encoding information here. When we revise our field name
                 //       storage strategy[1], we should make sure to capture this for tooling's sake.
@@ -483,7 +478,7 @@ impl<'top> TextBufferView<'top> {
                         return Err(nom::Err::Error(IonParseError::Invalid(error)));
                     }
                 };
-                Ok(Some(RawFieldExpr::NameValuePair(
+                Ok(Some(RawFieldExpr::new(
                     name,
                     RawValueExpr::MacroInvocation(invocation),
                 )))
@@ -508,7 +503,7 @@ impl<'top> TextBufferView<'top> {
                     }
                 };
                 let field_value = LazyRawTextValue_1_1::new(value);
-                Ok(Some(RawFieldExpr::NameValuePair(
+                Ok(Some(RawFieldExpr::new(
                     field_name,
                     RawValueExpr::ValueLiteral(field_value),
                 )))
@@ -2954,9 +2949,6 @@ mod tests {
     #[case::e_exp_in_e_exp("(:foo (:bar 1))")]
     #[case::e_exp_in_list("[a, b, (:foo 1)]")]
     #[case::e_exp_in_sexp("(a (:foo 1) c)")]
-    #[case::e_exp_in_struct("{(:foo)}")]
-    // #[case::e_exp_in_struct_with_space_before("{ (:foo)}")]
-    #[case::e_exp_in_struct_with_space_after("{(:foo) }")]
     // #[case::e_exp_in_struct_field("{a:(:foo)}")]
     // #[case::e_exp_in_struct_field_with_comma("{a:(:foo),}")]
     #[case::e_exp_in_struct_field_with_comma_and_second_field("{a:(:foo), b:2}")]
