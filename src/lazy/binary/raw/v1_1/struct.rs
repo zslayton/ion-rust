@@ -2,6 +2,7 @@
 
 use std::fmt;
 use std::fmt::{Debug, Formatter};
+use std::ops::Range;
 
 use crate::lazy::binary::raw::v1_1::annotations_iterator::RawBinaryAnnotationsIterator_1_1;
 use crate::lazy::binary::raw::v1_1::{
@@ -128,6 +129,14 @@ impl<'top> LazyRawFieldPrivate<'top, BinaryEncoding_1_1> for LazyRawBinaryField_
     fn into_value(self) -> LazyRawBinaryValue_1_1<'top> {
         self.value
     }
+
+    fn input_span(&self) -> &[u8] {
+        self.value.input.bytes()
+    }
+
+    fn input_offset(&self) -> usize {
+        self.value.input.offset()
+    }
 }
 
 impl<'top> LazyRawField<'top, BinaryEncoding_1_1> for LazyRawBinaryField_1_1<'top> {
@@ -137,6 +146,20 @@ impl<'top> LazyRawField<'top, BinaryEncoding_1_1> for LazyRawBinaryField_1_1<'to
 
     fn value(&self) -> LazyRawBinaryValue_1_1<'top> {
         self.value()
+    }
+
+    fn name_range(&self) -> Range<usize> {
+        self.value.encoded_value.field_id_range().unwrap()
+    }
+
+    fn name_span(&self) -> &[u8] {
+        let stream_range = self.name_range();
+        let input = self.input_span();
+        let offset = self.input_offset();
+        let local_range = (stream_range.start - offset)..(stream_range.end - offset);
+        input
+            .get(local_range)
+            .expect("field name bytes not in buffer")
     }
 }
 

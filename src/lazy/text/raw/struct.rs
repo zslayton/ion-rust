@@ -137,6 +137,14 @@ impl<'top> LazyRawFieldPrivate<'top, TextEncoding_1_0> for LazyRawTextField_1_0<
     fn into_value(self) -> LazyRawTextValue_1_0<'top> {
         self.value
     }
+
+    fn input_span(&self) -> &[u8] {
+        self.value.matched.input.bytes()
+    }
+
+    fn input_offset(&self) -> usize {
+        self.value.matched.input.offset()
+    }
 }
 
 impl<'top> LazyRawField<'top, TextEncoding_1_0> for LazyRawTextField_1_0<'top> {
@@ -146,6 +154,21 @@ impl<'top> LazyRawField<'top, TextEncoding_1_0> for LazyRawTextField_1_0<'top> {
 
     fn value(&self) -> LazyRawTextValue_1_0<'top> {
         self.value()
+    }
+
+    fn name_range(&self) -> Range<usize> {
+        self.value.matched.encoded_value.field_name_range().unwrap()
+    }
+
+    fn name_span(&self) -> &[u8] {
+        let stream_range = self.name_range();
+        let input_buffer = &self.value.matched.input;
+        let offset = input_buffer.offset();
+        let local_range = (stream_range.start - offset)..(stream_range.end - offset);
+        input_buffer
+            .bytes()
+            .get(local_range)
+            .expect("field name bytes not in buffer")
     }
 }
 
@@ -188,7 +211,9 @@ impl<'top> IntoIterator for LazyRawTextStruct_1_0<'top> {
 mod tests {
     use std::ops::Range;
 
+    use crate::lazy::decoder::{LazyRawReader, LazyRawStruct, LazyRawValue};
     use crate::lazy::text::raw::reader::LazyRawTextReader_1_0;
+    use crate::lazy::text::raw::v1_1::reader::LazyRawTextReader_1_1;
     use crate::IonResult;
     use bumpalo::Bump as BumpAllocator;
 
@@ -208,8 +233,8 @@ mod tests {
 
     #[test]
     fn struct_range() -> IonResult<()> {
-        // For each pair below, we'll confirm that the top-level list is found to
-        // occupy the specified input span.
+        // For each pair below, we'll confirm that the top-level struct is found to
+        // occupy the specified input range.
         let tests = &[
             // (Ion input, expected range of the struct)
             ("{}", 0..2),
@@ -225,6 +250,39 @@ mod tests {
         ];
         for test in tests {
             expect_struct_range(test.0, test.1.clone())?;
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn field_name_ranges() -> IonResult<()> {
+        // For each pair below, we'll confirm that the top-level struct's field names are found to
+        // occupy the specified input ranges.
+        let tests: &[(&str, &[Range<usize>])] = &[
+            // (Ion input, expected ranges of the struct's field names)
+            ("{a:1}", &[1..2]),
+            ("{a: 1}", &[1..2]),
+            ("{a: 1, b: 2}", &[1..2, 7..8]),
+            ("{a: 1, /* comment }}} */ b: 2}", &[1..2, 24..25]),
+            ("{ a: /* comment */ 1, b: 2}", &[2..3, 22..23]),
+            (
+                "{a: 1, b: 2, c: {d: 3, e: 4, f: 5}, g: 6}",
+                &[1..2, 7..8, 13..14, 36..37],
+            ),
+        ];
+        for (input, field_name_ranges) in tests {
+            let bump = bumpalo::Bump::new();
+            let mut reader = LazyRawTextReader_1_1::new(input.as_bytes());
+            let struct_ = reader
+                .next(&bump)?
+                .expect_value()?
+                .read()?
+                .expect_struct()?;
+            for (field_result, range) in struct_.iter().zip(field_name_ranges.iter()) {
+                // let = field_result?.expect_name_value()?;
+                // assert_eq!(field.na)
+                todo!()
+            }
         }
         Ok(())
     }

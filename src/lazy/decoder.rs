@@ -165,6 +165,12 @@ pub(crate) mod private {
         // safely assume that the value has a field name associated with it. This method allows
         // us to convert from one to the other when needed.
         fn into_value(self) -> D::Value<'top>;
+
+        /// Returns the input data from which this field was parsed.
+        fn input_span(&self) -> &[u8];
+
+        /// Returns the offset at which the input data containing this field began.
+        fn input_offset(&self) -> usize;
     }
 
     pub trait LazyContainerPrivate<'top, D: LazyDecoder> {
@@ -241,4 +247,52 @@ pub trait LazyRawField<'top, D: LazyDecoder>:
 {
     fn name(&self) -> RawSymbolTokenRef<'top>;
     fn value(&self) -> D::Value<'top>;
+
+    /// Returns the stream offset range that contains the encoded bytes of both the field
+    /// name and the field value.
+    ///
+    /// If there are additional bytes between the field name and value, they will also be
+    /// part of the range. In text, this includes the delimiting `:`, whitespace, and potentially
+    /// comments.
+    fn range(&self) -> Range<usize> {
+        let name_start = self.name_range().start;
+        let value_end = self.value_range().end;
+        name_start..value_end
+    }
+
+    /// Returns the input span that contains the encoded bytes of both the field name and the
+    /// field value.
+    ///
+    /// If there are additional bytes between the field name and value, they will also be
+    /// part of the range. In text, this includes the delimiting `:`, whitespace, and potentially
+    /// comments.
+    fn span(&self) -> &[u8] {
+        let stream_range = self.range();
+        let input = self.input_span();
+        let offset = self.input_offset();
+        let local_range = (stream_range.start - offset)..(stream_range.end - offset);
+        input
+            .get(local_range)
+            .expect("field name bytes not in buffer")
+    }
+
+    /// Returns the stream offset range that contains the encoded bytes of the field's name.
+    fn name_range(&self) -> Range<usize>;
+    /// Returns the input span that contains the encoded bytes of the field's name.
+    fn name_span(&self) -> &[u8];
+
+    /// Returns the stream offset range that contains the encoded bytes of the field's value.
+    fn value_range(&self) -> Range<usize> {
+        self.value().range()
+    }
+    /// Returns the input span that contains the encoded bytes of the field's value.
+    fn value_span(&self) -> &[u8] {
+        let stream_range = self.value_range();
+        let input = self.input_span();
+        let offset = self.input_offset();
+        let local_range = (stream_range.start - offset)..(stream_range.end - offset);
+        input
+            .get(local_range)
+            .expect("field value bytes not in buffer")
+    }
 }
