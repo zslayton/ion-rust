@@ -3,11 +3,33 @@ use std::ops::Range;
 
 use bumpalo::Bump as BumpAllocator;
 
+use crate::lazy::encoding::RawValueLiteral;
 use crate::lazy::expanded::macro_evaluator::RawEExpression;
 use crate::lazy::raw_stream_item::LazyRawStreamItem;
 use crate::lazy::raw_value_ref::RawValueRef;
+use crate::lazy::text::raw::v1_1::reader::LazyRawTextFieldName_1_1;
 use crate::result::IonFailure;
 use crate::{IonResult, IonType, RawSymbolTokenRef};
+
+pub trait HasSpan<'top>: HasRange {
+    fn span(&self) -> &'top [u8];
+}
+
+// impl<'top, T: HasSpan<'top>> HasSpan<'top> for &T {
+//     fn span(&self) -> &'top [u8] {
+//         (*self).span()
+//     }
+// }
+
+pub trait HasRange {
+    fn range(&self) -> Range<usize>;
+}
+
+// impl<T: HasRange> HasRange for &T {
+//     fn range(&self) -> Range<usize> {
+//         (*self).range()
+//     }
+// }
 
 /// A family of types that collectively comprise the lazy reader API for an Ion serialization
 /// format. These types operate at the 'raw' level; they do not attempt to resolve symbols
@@ -34,6 +56,8 @@ pub trait LazyDecoder: 'static + Sized + Debug + Clone + Copy {
     type List<'top>: LazyRawSequence<'top, Self>;
     /// A struct whose fields may be accessed iteratively or by field name.
     type Struct<'top>: LazyRawStruct<'top, Self>;
+    /// A symbol token representing the name of a field within a struct.
+    type FieldName<'top>: LazyRawFieldName<'top>;
     /// An iterator over the annotations on the input stream's values.
     type AnnotationsIterator<'top>: Iterator<Item = IonResult<RawSymbolTokenRef<'top>>>;
     /// An e-expression invoking a macro. (Ion 1.1+)
@@ -89,32 +113,50 @@ impl<V: Debug, M: Debug> RawValueExpr<V, M> {
     }
 }
 
-/// An item found in field position within a struct.
-/// This item may be:
-///   * a name/value pair (as it is in Ion 1.0)
-///   * a name/e-expression pair
+impl<V: HasRange, M: HasRange> HasRange for RawValueExpr<V, M> {
+    fn range(&self) -> Range<usize> {
+        match self {
+            RawValueExpr::ValueLiteral(value) => value.range(),
+            RawValueExpr::MacroInvocation(eexp) => eexp.range(),
+        }
+    }
+}
+
+impl<'top, V: HasSpan<'top>, M: HasSpan<'top>> HasSpan<'top> for RawValueExpr<V, M> {
+    fn span(&self) -> &'top [u8] {
+        match self {
+            RawValueExpr::ValueLiteral(value) => value.span(),
+            RawValueExpr::MacroInvocation(eexp) => eexp.span(),
+        }
+    }
+}
+
+/// A (name, value expression) pair representing a field in a struct.
+/// The value expression may be either:
+///   * a value literal
 ///   * an e-expression
-#[derive(Clone, Debug)]
-pub struct RawFieldExpr<'top, V: Copy, M: Copy> {
-    name: RawSymbolTokenRef<'top>,
+#[derive(Copy, Clone, Debug)]
+pub struct RawFieldExpr<N: Copy, V: Copy, M: Copy> {
+    name: N,
     value_expr: RawValueExpr<V, M>,
 }
 
-impl<'top, V: Copy, M: Copy> RawFieldExpr<'top, V, M> {
-    pub fn new(name: RawSymbolTokenRef<'top>, value_expr: impl Into<RawValueExpr<V, M>>) -> Self {
+impl<N: Copy, V: Copy, M: Copy> RawFieldExpr<N, V, M> {
+    pub fn new(name: impl Into<N>, value_expr: impl Into<RawValueExpr<V, M>>) -> Self {
         Self {
-            name,
+            name: name.into(),
             value_expr: value_expr.into(),
         }
     }
 
-    pub fn into_name_value(self) -> (RawSymbolTokenRef<'top>, RawValueExpr<V, M>) {
+    pub fn into_pair(self) -> (N, RawValueExpr<V, M>) {
         (self.name, self.value_expr)
     }
 
-    pub fn name(&self) -> &RawSymbolTokenRef<'top> {
-        &self.name
+    pub fn name(&self) -> N {
+        self.name
     }
+
     pub fn value_expr(&self) -> RawValueExpr<V, M> {
         self.value_expr
     }
@@ -126,28 +168,42 @@ impl<'top, V: Copy, M: Copy> RawFieldExpr<'top, V, M> {
 
 /// An item found in struct field position an Ion data stream written in the encoding represented
 /// by the LazyDecoder `D`.
-pub type LazyRawFieldExpr<'top, D> =
-    RawFieldExpr<'top, <D as LazyDecoder>::Value<'top>, <D as LazyDecoder>::EExpression<'top>>;
+pub type LazyRawFieldExpr<'top, D> = RawFieldExpr<
+    <D as LazyDecoder>::FieldName<'top>,
+    <D as LazyDecoder>::Value<'top>,
+    <D as LazyDecoder>::EExpression<'top>,
+>;
 
-impl<'name, V: Copy + Debug, M: Copy + Debug> RawFieldExpr<'name, V, M> {
-    pub fn expect_name_value(self) -> IonResult<(RawSymbolTokenRef<'name>, V)> {
+impl<N: Copy + Debug, V: Copy + Debug, M: Copy + Debug> RawFieldExpr<N, V, M> {
+    pub fn expect_name_value(self) -> IonResult<(N, V)> {
         let RawValueExpr::ValueLiteral(value) = self.value_expr() else {
             return IonResult::decoding_error(format!(
                 "expected a name/value pair but found {:?}",
                 self
             ));
         };
-        Ok((self.into_name_value().0, value))
+        Ok((self.into_pair().0, value))
     }
 
-    pub fn expect_name_macro(self) -> IonResult<(RawSymbolTokenRef<'name>, M)> {
+    pub fn expect_name_macro(self) -> IonResult<(N, M)> {
         let RawValueExpr::MacroInvocation(invocation) = self.value_expr() else {
             return IonResult::decoding_error(format!(
                 "expected a name/macro pair but found {:?}",
                 self
             ));
         };
-        Ok((self.into_name_value().0, invocation))
+        Ok((self.into_pair().0, invocation))
+    }
+}
+
+impl<'top, N: Copy + HasRange, V: Copy + HasRange, M: Copy + HasRange> HasRange
+    for RawFieldExpr<N, V, M>
+{
+    // This type does not offer a `span()` method get get the bytes of the entire field.
+    // We could add this in the future, but it comes at the expense of increased data size.
+    // The spans for the field name and value can be viewed via their respective accessor methods.
+    fn range(&self) -> Range<usize> {
+        self.name.range().start..self.value_expr.range().end
     }
 }
 
@@ -160,24 +216,10 @@ impl<'name, V: Copy + Debug, M: Copy + Debug> RawFieldExpr<'name, V, M> {
 // internal code that is defined in terms of `LazyRawField` to call the private `into_value()`
 // function while also preventing users from seeing or depending on it.
 pub(crate) mod private {
-    use crate::lazy::encoding::RawValueLiteral;
-    use crate::{IonResult, RawSymbolTokenRef};
-
-    use super::LazyDecoder;
-
-    pub trait LazyRawFieldPrivate<'top, D: LazyDecoder> {
-        /// Converts the `LazyRawField` impl to a `LazyRawValue` impl.
-        // At the moment, `LazyRawField`s are just thin wrappers around a `LazyRawValue` that can
-        // safely assume that the value has a field name associated with it. This method allows
-        // us to convert from one to the other when needed.
-        fn into_value(self) -> D::Value<'top>;
-
-        /// Returns the input data from which this field was parsed.
-        fn input_span(&self) -> &[u8];
-
-        /// Returns the offset at which the input data containing this field began.
-        fn input_offset(&self) -> usize;
-    }
+    use super::{LazyDecoder, LazyRawFieldExpr, LazyRawStruct, LazyRawValueExpr};
+    use crate::lazy::expanded::r#struct::UnexpandedField;
+    use crate::lazy::expanded::EncodingContext;
+    use crate::IonResult;
 
     pub trait LazyContainerPrivate<'top, D: LazyDecoder> {
         /// Constructs a new lazy raw container from a lazy raw value that has been confirmed to be
@@ -185,10 +227,53 @@ pub(crate) mod private {
         fn from_value(value: D::Value<'top>) -> Self;
     }
 
-    pub trait LazyRawValuePrivate<'top>: RawValueLiteral {
-        /// Returns the field name associated with this value. If the value is not inside a struct,
-        /// returns `IllegalOperation`.
-        fn field_name(&self) -> IonResult<RawSymbolTokenRef<'top>>;
+    pub trait LazyRawStructPrivate<'top, D: LazyDecoder> {
+        fn unexpanded_fields(
+            &self,
+            context: EncodingContext<'top>,
+        ) -> RawStructUnexpandedFieldsIterator<'top, D>;
+    }
+
+    pub struct RawStructUnexpandedFieldsIterator<'top, D: LazyDecoder> {
+        context: EncodingContext<'top>,
+        raw_fields: <D::Struct<'top> as LazyRawStruct<'top, D>>::Iterator,
+    }
+
+    impl<'top, D: LazyDecoder> Iterator for RawStructUnexpandedFieldsIterator<'top, D> {
+        type Item = IonResult<UnexpandedField<'top, D>>;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            let field: LazyRawFieldExpr<'top, D> = match self.raw_fields.next() {
+                Some(Ok(field)) => field,
+                Some(Err(e)) => return Some(Err(e)),
+                None => return None,
+            };
+            let unexpanded = match field.value_expr() {
+                LazyRawValueExpr::<D>::ValueLiteral(v) => {
+                    UnexpandedField::RawNameValue(self.context, field.name(), v)
+                }
+                LazyRawValueExpr::<D>::MacroInvocation(eexp) => {
+                    UnexpandedField::RawNameEExp(self.context, field.name(), eexp)
+                }
+            };
+            Some(Ok(unexpanded))
+        }
+    }
+
+    impl<'top, D: LazyDecoder<Struct<'top> = S>, S> LazyRawStructPrivate<'top, D> for S
+    where
+        S: LazyRawStruct<'top, D>,
+    {
+        fn unexpanded_fields(
+            &self,
+            context: EncodingContext<'top>,
+        ) -> RawStructUnexpandedFieldsIterator<'top, D> {
+            let raw_fields = <Self as LazyRawStruct<'top, D>>::iter(self);
+            RawStructUnexpandedFieldsIterator {
+                context,
+                raw_fields,
+            }
+        }
     }
 }
 
@@ -217,15 +302,12 @@ pub trait LazyRawReader<'data, D: LazyDecoder>: Sized {
 }
 
 pub trait LazyRawValue<'top, D: LazyDecoder>:
-    private::LazyRawValuePrivate<'top> + Copy + Clone + Debug + Sized
+    HasSpan<'top> + RawValueLiteral + Copy + Clone + Debug + Sized
 {
     fn ion_type(&self) -> IonType;
     fn is_null(&self) -> bool;
     fn annotations(&self) -> D::AnnotationsIterator<'top>;
     fn read(&self) -> IonResult<RawValueRef<'top, D>>;
-
-    fn range(&self) -> Range<usize>;
-    fn span(&self) -> &[u8];
 }
 
 pub trait LazyRawSequence<'top, D: LazyDecoder>:
@@ -239,7 +321,11 @@ pub trait LazyRawSequence<'top, D: LazyDecoder>:
 }
 
 pub trait LazyRawStruct<'top, D: LazyDecoder>:
-    private::LazyContainerPrivate<'top, D> + Debug + Copy + Clone
+    private::LazyContainerPrivate<'top, D>
+    + private::LazyRawStructPrivate<'top, D>
+    + Debug
+    + Copy
+    + Clone
 {
     type Iterator: Iterator<Item = IonResult<LazyRawFieldExpr<'top, D>>>;
 
@@ -248,57 +334,6 @@ pub trait LazyRawStruct<'top, D: LazyDecoder>:
     fn iter(&self) -> Self::Iterator;
 }
 
-pub trait LazyRawField<'top, D: LazyDecoder>:
-    private::LazyRawFieldPrivate<'top, D> + Debug
-{
-    fn name(&self) -> RawSymbolTokenRef<'top>;
-    fn value(&self) -> D::Value<'top>;
-
-    /// Returns the stream offset range that contains the encoded bytes of both the field
-    /// name and the field value.
-    ///
-    /// If there are additional bytes between the field name and value, they will also be
-    /// part of the range. In text, this includes the delimiting `:`, whitespace, and potentially
-    /// comments.
-    fn range(&self) -> Range<usize> {
-        let name_start = self.name_range().start;
-        let value_end = self.value_range().end;
-        name_start..value_end
-    }
-
-    /// Returns the input span that contains the encoded bytes of both the field name and the
-    /// field value.
-    ///
-    /// If there are additional bytes between the field name and value, they will also be
-    /// part of the range. In text, this includes the delimiting `:`, whitespace, and potentially
-    /// comments.
-    fn span(&self) -> &[u8] {
-        let stream_range = self.range();
-        let input = self.input_span();
-        let offset = self.input_offset();
-        let local_range = (stream_range.start - offset)..(stream_range.end - offset);
-        input
-            .get(local_range)
-            .expect("field name bytes not in buffer")
-    }
-
-    /// Returns the stream offset range that contains the encoded bytes of the field's name.
-    fn name_range(&self) -> Range<usize>;
-    /// Returns the input span that contains the encoded bytes of the field's name.
-    fn name_span(&self) -> &[u8];
-
-    /// Returns the stream offset range that contains the encoded bytes of the field's value.
-    fn value_range(&self) -> Range<usize> {
-        self.value().range()
-    }
-    /// Returns the input span that contains the encoded bytes of the field's value.
-    fn value_span(&self) -> &[u8] {
-        let stream_range = self.value_range();
-        let input = self.input_span();
-        let offset = self.input_offset();
-        let local_range = (stream_range.start - offset)..(stream_range.end - offset);
-        input
-            .get(local_range)
-            .expect("field value bytes not in buffer")
-    }
+pub trait LazyRawFieldName<'top>: HasSpan<'top> + Copy + Debug + Clone {
+    fn read(&self) -> IonResult<RawSymbolTokenRef<'top>>;
 }

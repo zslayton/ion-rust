@@ -145,7 +145,7 @@ impl<'top> Iterator for RawBinarySequenceIterator_1_0<'top> {
     fn next(&mut self) -> Option<Self::Item> {
         match self
             .source
-            .try_parse_next(ImmutableBuffer::peek_sequence_value)
+            .try_parse_next_value(ImmutableBuffer::peek_sequence_value)
         {
             Ok(Some(value)) => Some(Ok(RawValueExpr::ValueLiteral(value))),
             Ok(None) => None,

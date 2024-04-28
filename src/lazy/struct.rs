@@ -249,27 +249,28 @@ impl<'top, D: LazyDecoder> Debug for LazyField<'top, D> {
 impl<'top, D: LazyDecoder> LazyField<'top, D> {
     /// Returns a symbol representing the name of this field.
     pub fn name(&self) -> IonResult<SymbolRef<'top>> {
-        let field_name = self.expanded_field.raw_name();
-        let field_id = match field_name {
-            RawSymbolTokenRef::SymbolId(sid) => sid,
-            RawSymbolTokenRef::Text(text) => return Ok(SymbolRef::with_text(text)),
-        };
-        self.expanded_field
-            .value
-            .context
-            .symbol_table
-            .symbol_for(field_id)
-            .map(|symbol| symbol.into())
-            .ok_or_else(|| {
-                IonError::decoding_error("found a symbol ID that was not in the symbol table")
-            })
+        self.expanded_field.name().read()
+        // let field_name = self.expanded_field.name()?;
+        // let field_id = match field_name {
+        //     RawSymbolTokenRef::SymbolId(sid) => sid,
+        //     RawSymbolTokenRef::Text(text) => return Ok(SymbolRef::with_text(text)),
+        // };
+        // self.expanded_field
+        //     .value
+        //     .context
+        //     .symbol_table
+        //     .symbol_for(field_id)
+        //     .map(|symbol| symbol.into())
+        //     .ok_or_else(|| {
+        //         IonError::decoding_error("found a symbol ID that was not in the symbol table")
+        //     })
     }
 
     /// Returns a lazy value representing the value of this field. To access the value's data,
     /// see [`LazyValue::read`].
     pub fn value(&self) -> LazyValue<'top, D> {
         LazyValue {
-            expanded_value: *self.expanded_field.value(),
+            expanded_value: self.expanded_field.value(),
         }
     }
 }

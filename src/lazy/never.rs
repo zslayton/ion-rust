@@ -1,6 +1,7 @@
 use std::fmt::Debug;
+use std::ops::Range;
 
-use crate::lazy::decoder::{LazyDecoder, LazyRawValueExpr};
+use crate::lazy::decoder::{HasRange, HasSpan, LazyDecoder, LazyRawValueExpr};
 use crate::lazy::encoder::annotation_seq::AnnotationSeq;
 use crate::lazy::encoder::value_writer::internal::{FieldEncoder, MakeValueWriter};
 use crate::lazy::encoder::value_writer::{
@@ -16,6 +17,18 @@ use crate::{Decimal, Int, IonResult, IonType, Timestamp};
 #[derive(Debug, Copy, Clone)]
 pub enum Never {
     // Has no variants, cannot be instantiated.
+}
+
+impl<'top> HasSpan<'top> for Never {
+    fn span(&self) -> &'top [u8] {
+        unreachable!("<Never as HasSpan>::span")
+    }
+}
+
+impl<'top> HasRange for Never {
+    fn range(&self) -> Range<usize> {
+        unreachable!("<Never as HasSpan>::range")
+    }
 }
 
 // Ion 1.0 uses `Never` as a placeholder type for MacroInvocation.

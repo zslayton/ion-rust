@@ -19,7 +19,7 @@ impl<'a> Debug for SymbolRef<'a> {
 
 impl<'a> SymbolRef<'a> {
     /// If this symbol has known text, returns `Some(&str)`. Otherwise, returns `None`.
-    pub fn text(&self) -> Option<&str> {
+    pub fn text(&self) -> Option<&'a str> {
         self.text
     }
 

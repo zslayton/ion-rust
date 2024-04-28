@@ -42,14 +42,16 @@ use sequence::{LazyExpandedList, LazyExpandedSExp};
 
 use crate::element::iterators::SymbolsIterator;
 use crate::lazy::bytes_ref::BytesRef;
-use crate::lazy::decoder::{LazyDecoder, LazyRawValue};
-use crate::lazy::encoding::RawValueLiteral;
+use crate::lazy::decoder::{LazyDecoder, LazyRawFieldName, LazyRawValue};
+use crate::lazy::encoding::{Encoding, RawValueLiteral};
 use crate::lazy::expanded::compiler::TemplateCompiler;
 use crate::lazy::expanded::macro_evaluator::{MacroEvaluator, RawEExpression};
 use crate::lazy::expanded::macro_table::MacroTable;
 use crate::lazy::expanded::r#struct::LazyExpandedStruct;
 use crate::lazy::expanded::sequence::Environment;
-use crate::lazy::expanded::template::{TemplateElement, TemplateMacro, TemplateValue};
+use crate::lazy::expanded::template::{
+    TemplateElement, TemplateMacro, TemplateMacroRef, TemplateValue,
+};
 use crate::lazy::r#struct::LazyStruct;
 use crate::lazy::raw_value_ref::RawValueRef;
 use crate::lazy::sequence::{LazyList, LazySExp};
@@ -61,7 +63,9 @@ use crate::lazy::text::raw::v1_1::reader::MacroAddress;
 use crate::lazy::value::LazyValue;
 use crate::raw_symbol_token_ref::AsRawSymbolTokenRef;
 use crate::result::IonFailure;
-use crate::{Decimal, Int, IonResult, IonType, RawSymbolTokenRef, SymbolTable, Timestamp};
+use crate::{
+    Decimal, Int, IonResult, IonType, RawSymbolTokenRef, SymbolRef, SymbolTable, Timestamp,
+};
 
 // All of these modules (and most of their types) are currently `pub` as the lazy reader is gated
 // behind an experimental feature flag. We may constrain access to them in the future as the code
@@ -372,6 +376,7 @@ impl<Encoding: LazyDecoder, Input: IonInput> LazyExpandingReader<Encoding, Input
                     let value = LazyExpandedValue {
                         source: ExpandedValueSource::ValueLiteral(raw_value),
                         context: self.context(),
+                        variable: None,
                     };
                     return self.interpret_value(value);
                 }
@@ -477,11 +482,31 @@ impl<'top, V: RawValueLiteral, Encoding: LazyDecoder<Value<'top> = V>> From<V>
     }
 }
 
+/// A variable found in the body of a template macro.
+#[derive(Debug, Copy, Clone)]
+pub(crate) struct TemplateVariableReference<'top> {
+    template: TemplateMacroRef<'top>,
+    signature_index: usize,
+}
+
+impl<'top> TemplateVariableReference<'top> {
+    fn name(&self) -> &'top str {
+        self.template.signature.parameters()[self.signature_index].name()
+    }
+
+    fn host_template(&self) -> TemplateMacroRef<'top> {
+        self.template
+    }
+}
+
 /// A value produced by expanding the 'raw' view of the input data.
 #[derive(Copy, Clone)]
 pub struct LazyExpandedValue<'top, Encoding: LazyDecoder> {
     pub(crate) context: EncodingContext<'top>,
     pub(crate) source: ExpandedValueSource<'top, Encoding>,
+    // If this value came from a variable reference in a template macro expansion, the
+    // template and the name of the variable can be found here.
+    pub(crate) variable: Option<TemplateVariableReference<'top>>,
 }
 
 impl<'top, Encoding: LazyDecoder> Debug for LazyExpandedValue<'top, Encoding> {
@@ -491,10 +516,14 @@ impl<'top, Encoding: LazyDecoder> Debug for LazyExpandedValue<'top, Encoding> {
 }
 
 impl<'top, Encoding: LazyDecoder> LazyExpandedValue<'top, Encoding> {
-    pub(crate) fn from_value(context: EncodingContext<'top>, value: Encoding::Value<'top>) -> Self {
+    pub(crate) fn from_literal(
+        context: EncodingContext<'top>,
+        value: Encoding::Value<'top>,
+    ) -> Self {
         Self {
             context,
             source: ExpandedValueSource::ValueLiteral(value),
+            variable: None,
         }
     }
 
@@ -506,7 +535,13 @@ impl<'top, Encoding: LazyDecoder> LazyExpandedValue<'top, Encoding> {
         Self {
             context,
             source: ExpandedValueSource::Template(environment, element),
+            variable: None,
         }
+    }
+
+    pub(crate) fn via_variable(mut self, variable_ref: TemplateVariableReference<'top>) -> Self {
+        self.variable = Some(variable_ref);
+        self
     }
 
     pub fn ion_type(&self) -> IonType {

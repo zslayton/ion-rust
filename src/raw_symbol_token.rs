@@ -1,5 +1,8 @@
 use crate::SymbolId;
 
+// TODO: Remove this, replace it with RawSymbolTokenRef<'top> now that the bump allocator is plumbed
+//       through to the raw readers
+
 /// A symbol token encountered in a text or binary Ion stream.
 /// [RawSymbolToken]s do not store import source information for the token encountered. Similarly,
 /// a [RawSymbolToken] cannot store both a symbol ID _and_ text, which means that it is not suitable

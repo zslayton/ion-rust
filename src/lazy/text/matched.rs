@@ -99,6 +99,7 @@ pub(crate) enum MatchedFieldNameSyntax {
 impl MatchedFieldNameSyntax {
     pub fn read<'data>(
         &self,
+        // TODO: Remove allocator, use the one in TBV
         allocator: &'data BumpAllocator,
         matched_input: TextBufferView<'data>,
     ) -> IonResult<RawSymbolTokenRef<'data>> {
@@ -114,32 +115,31 @@ impl MatchedFieldNameSyntax {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
-pub(crate) struct MatchedFieldName {
+pub(crate) struct MatchedFieldName<'top> {
     // This is stored as a tuple to allow this type to be `Copy`; Range<usize> is not `Copy`.
-    span: (usize, usize),
+    input: TextBufferView<'top>,
     syntax: MatchedFieldNameSyntax,
 }
 
-impl MatchedFieldName {
-    pub fn new(syntax: MatchedFieldNameSyntax, span: Range<usize>) -> Self {
-        Self {
-            span: (span.start, span.end),
-            syntax,
-        }
+impl<'top> MatchedFieldName<'top> {
+    pub fn new(input: TextBufferView<'top>, syntax: MatchedFieldNameSyntax) -> Self {
+        Self { input, syntax }
     }
-    pub fn span(&self) -> Range<usize> {
-        self.span.0..self.span.1
-    }
+
     pub fn syntax(&self) -> MatchedFieldNameSyntax {
         self.syntax
     }
 
-    pub fn read<'data>(
-        &self,
-        allocator: &'data BumpAllocator,
-        matched_input: TextBufferView<'data>,
-    ) -> IonResult<RawSymbolTokenRef<'data>> {
-        self.syntax.read(allocator, matched_input)
+    pub fn read(&self) -> IonResult<RawSymbolTokenRef<'top>> {
+        self.syntax.read(self.input.allocator, self.input)
+    }
+
+    pub fn range(&self) -> Range<usize> {
+        self.input.range()
+    }
+
+    pub fn span(&self) -> &'top [u8] {
+        self.input.bytes()
     }
 }
 
@@ -856,7 +856,9 @@ impl MatchedSymbol {
         // Take a slice of the input that ignores the first and last bytes, which are quotes.
         let body = matched_input.slice(1, matched_input.len() - 2);
         // There are no escaped characters, so we can just validate the string in-place.
-        let text = body.as_text()?;
+        let text = body
+            .as_text()
+            .expect("successfully lexed symbol later found to be invalid UTF-8");
         let str_ref = RawSymbolTokenRef::Text(text);
         Ok(str_ref)
     }
@@ -871,7 +873,6 @@ impl MatchedSymbol {
 
         // There are escaped characters. We need to build a new version of our symbol
         // that replaces the escaped characters with their corresponding bytes.
-        // let mut sanitized = Vec::with_capacity(matched_input.len());
         let mut sanitized = BumpVec::with_capacity_in(matched_input.len(), allocator);
         replace_escapes_with_byte_values(body, &mut sanitized, false, true)?;
         let text = std::str::from_utf8(sanitized.into_bump_slice()).unwrap();

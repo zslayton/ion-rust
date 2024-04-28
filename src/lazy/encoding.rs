@@ -4,9 +4,10 @@ use std::fmt::Debug;
 
 use crate::lazy::any_encoding::LazyRawAnyValue;
 use crate::lazy::binary::raw::annotations_iterator::RawBinaryAnnotationsIterator;
-use crate::lazy::binary::raw::r#struct::LazyRawBinaryStruct_1_0;
+use crate::lazy::binary::raw::r#struct::{LazyRawBinaryFieldName_1_0, LazyRawBinaryStruct_1_0};
 use crate::lazy::binary::raw::reader::LazyRawBinaryReader_1_0;
 use crate::lazy::binary::raw::sequence::{LazyRawBinaryList_1_0, LazyRawBinarySExp_1_0};
+use crate::lazy::binary::raw::v1_1::r#struct::LazyRawBinaryFieldName_1_1;
 use crate::lazy::binary::raw::v1_1::reader::LazyRawBinaryReader_1_1;
 use crate::lazy::binary::raw::v1_1::{
     r#struct::LazyRawBinaryStruct_1_1,
@@ -18,12 +19,12 @@ use crate::lazy::binary::raw::value::LazyRawBinaryValue_1_0;
 use crate::lazy::decoder::LazyDecoder;
 use crate::lazy::encoder::LazyEncoder;
 use crate::lazy::never::Never;
-use crate::lazy::text::raw::r#struct::LazyRawTextStruct_1_0;
+use crate::lazy::text::raw::r#struct::{LazyRawTextFieldName_1_0, LazyRawTextStruct_1_0};
 use crate::lazy::text::raw::reader::LazyRawTextReader_1_0;
 use crate::lazy::text::raw::sequence::{LazyRawTextList_1_0, LazyRawTextSExp_1_0};
 use crate::lazy::text::raw::v1_1::reader::{
-    LazyRawTextList_1_1, LazyRawTextReader_1_1, LazyRawTextSExp_1_1, LazyRawTextStruct_1_1,
-    RawTextEExpression_1_1,
+    LazyRawTextFieldName_1_1, LazyRawTextList_1_1, LazyRawTextReader_1_1, LazyRawTextSExp_1_1,
+    LazyRawTextStruct_1_1, RawTextEExpression_1_1,
 };
 use crate::lazy::text::value::{
     LazyRawTextValue, LazyRawTextValue_1_0, LazyRawTextValue_1_1, MatchedRawTextValue,
@@ -130,6 +131,7 @@ impl LazyDecoder for BinaryEncoding_1_0 {
     type SExp<'top> = LazyRawBinarySExp_1_0<'top>;
     type List<'top> = LazyRawBinaryList_1_0<'top>;
     type Struct<'top> = LazyRawBinaryStruct_1_0<'top>;
+    type FieldName<'top> = LazyRawBinaryFieldName_1_0<'top>;
     type AnnotationsIterator<'top> = RawBinaryAnnotationsIterator<'top>;
     // Macros are not supported in Ion 1.0
     type EExpression<'top> = Never;
@@ -142,6 +144,7 @@ impl LazyDecoder for TextEncoding_1_0 {
     type SExp<'top> = LazyRawTextSExp_1_0<'top>;
     type List<'top> = LazyRawTextList_1_0<'top>;
     type Struct<'top> = LazyRawTextStruct_1_0<'top>;
+    type FieldName<'top> = LazyRawTextFieldName_1_0<'top>;
     type AnnotationsIterator<'top> = RawTextAnnotationsIterator<'top>;
     // Macros are not supported in Ion 1.0
     type EExpression<'top> = Never;
@@ -154,6 +157,7 @@ impl LazyDecoder for TextEncoding_1_1 {
     type SExp<'top> = LazyRawTextSExp_1_1<'top>;
     type List<'top> = LazyRawTextList_1_1<'top>;
     type Struct<'top> = LazyRawTextStruct_1_1<'top>;
+    type FieldName<'top> = LazyRawTextFieldName_1_1<'top>;
     type AnnotationsIterator<'top> = RawTextAnnotationsIterator<'top>;
     type EExpression<'top> = RawTextEExpression_1_1<'top>;
 }
@@ -164,6 +168,7 @@ impl LazyDecoder for BinaryEncoding_1_1 {
     type Value<'top> = LazyRawBinaryValue_1_1<'top>;
     type SExp<'top> = LazyRawBinarySExp_1_1<'top>;
     type List<'top> = LazyRawBinaryList_1_1<'top>;
+    type FieldName<'top> = LazyRawBinaryFieldName_1_1<'top>;
     type Struct<'top> = LazyRawBinaryStruct_1_1<'top>;
     type AnnotationsIterator<'top> = RawBinaryAnnotationsIterator_1_1<'top>;
     // TODO: implement macros in 1.1

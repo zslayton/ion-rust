@@ -13,10 +13,11 @@
 #![allow(non_camel_case_types)]
 
 use std::fmt::{Debug, Formatter};
+use std::ops::Range;
 
 use bumpalo::collections::{String as BumpString, Vec as BumpVec};
 
-use crate::lazy::decoder::{LazyDecoder, LazyRawValueExpr};
+use crate::lazy::decoder::{HasSpan, LazyDecoder, LazyRawValueExpr};
 use crate::lazy::expanded::e_expression::{EExpression, EExpressionArgsIterator};
 use crate::lazy::expanded::macro_table::{MacroKind, MacroRef};
 use crate::lazy::expanded::sequence::Environment;
@@ -34,7 +35,7 @@ use crate::{IonError, IonResult, RawSymbolTokenRef};
 /// The syntactic entity in format `D` that represents an e-expression. This expression has not
 /// yet been resolved in the current encoding context.
 pub trait RawEExpression<'top, D: LazyDecoder<EExpression<'top> = Self>>:
-    Debug + Copy + Clone
+    HasSpan<'top> + Debug + Copy + Clone
 {
     /// An iterator that yields the macro invocation's arguments in order.
     type RawArgumentsIterator<'a>: Iterator<Item = IonResult<LazyRawValueExpr<'top, D>>>
@@ -597,6 +598,7 @@ impl<'top, D: LazyDecoder> MakeStringExpansion<'top, D> {
         Ok(Some(ValueExpr::ValueLiteral(LazyExpandedValue {
             context,
             source: ExpandedValueSource::Constructed(EMPTY_ANNOTATIONS, expanded_value_ref),
+            variable: None,
         })))
     }
 

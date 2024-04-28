@@ -21,7 +21,6 @@ use nom::multi::{fold_many1, fold_many_m_n, many0_count, many1_count};
 use nom::sequence::{delimited, pair, preceded, separated_pair, terminated, tuple};
 use nom::{AsBytes, CompareResult, IResult, InputLength, InputTake, Needed, Parser};
 
-use crate::lazy::decoder::private::LazyRawValuePrivate;
 use crate::lazy::decoder::{LazyRawFieldExpr, LazyRawValueExpr, RawFieldExpr, RawValueExpr};
 use crate::lazy::encoding::{TextEncoding, TextEncoding_1_0, TextEncoding_1_1};
 use crate::lazy::never::Never;
@@ -34,12 +33,12 @@ use crate::lazy::text::matched::{
 };
 use crate::lazy::text::parse_result::{InvalidInputError, IonParseError};
 use crate::lazy::text::parse_result::{IonMatchResult, IonParseResult};
-use crate::lazy::text::raw::r#struct::{LazyRawTextField_1_0, RawTextStructIterator_1_0};
+use crate::lazy::text::raw::r#struct::{LazyRawTextFieldName_1_0, RawTextStructIterator_1_0};
 use crate::lazy::text::raw::sequence::{RawTextListIterator_1_0, RawTextSExpIterator_1_0};
 use crate::lazy::text::raw::v1_1::reader::{
-    EncodedTextMacroInvocation, MacroIdRef, RawTextEExpression_1_1, RawTextListIterator_1_1,
-    RawTextSExpIterator_1_1, RawTextStructIterator_1_1, TextListSpanFinder_1_1,
-    TextSExpSpanFinder_1_1, TextStructSpanFinder_1_1,
+    EncodedTextMacroInvocation, LazyRawTextFieldName_1_1, MacroIdRef, RawTextEExpression_1_1,
+    RawTextListIterator_1_1, RawTextSExpIterator_1_1, RawTextStructIterator_1_1,
+    TextListSpanFinder_1_1, TextSExpSpanFinder_1_1, TextStructSpanFinder_1_1,
 };
 use crate::lazy::text::value::{LazyRawTextValue_1_0, LazyRawTextValue_1_1, MatchedRawTextValue};
 use crate::result::DecodingError;
@@ -186,7 +185,7 @@ impl<'top> TextBufferView<'top> {
     }
 
     /// Returns a slice containing all of the buffer's bytes.
-    pub fn bytes(&self) -> &[u8] {
+    pub fn bytes(&self) -> &'top [u8] {
         self.data
     }
 
@@ -199,6 +198,11 @@ impl<'top> TextBufferView<'top> {
     /// Returns the number of bytes in the buffer.
     pub fn len(&self) -> usize {
         self.data.len()
+    }
+
+    /// Returns the stream byte offset range that this buffer contains.
+    pub fn range(&self) -> Range<usize> {
+        self.offset..self.offset + self.len()
     }
 
     /// Returns `true` if there are no bytes in the buffer. Otherwise, returns `false`.
@@ -395,7 +399,9 @@ impl<'top> TextBufferView<'top> {
     ///
     /// If a pair is found, returns `Some(field)` and consumes the following comma if present.
     /// If no pair is found (that is: the end of the struct is next), returns `None`.
-    pub fn match_struct_field(self) -> IonParseResult<'top, Option<LazyRawTextField_1_0<'top>>> {
+    pub fn match_struct_field(
+        self,
+    ) -> IonParseResult<'top, Option<LazyRawFieldExpr<'top, TextEncoding_1_0>>> {
         // A struct field can have leading whitespace, but we want the buffer slice that we match
         // to begin with the field name. Here we skip any whitespace so we have another named
         // slice (`input_including_field_name`) with that property.
@@ -404,19 +410,13 @@ impl<'top> TextBufferView<'top> {
             // If the next thing in the input is a `}`, return `None`.
             value(None, Self::match_struct_end),
             // Otherwise, match a name/value pair and turn it into a `LazyRawTextField`.
-            Self::match_struct_field_name_and_value.map(move |(matched_field_name, mut value)| {
-                // Add the field name offsets to the `EncodedTextValue`
-                value.encoded_value = value.encoded_value.with_field_name(
-                    matched_field_name.syntax(),
-                    matched_field_name.span().start,
-                    matched_field_name.span().len(),
-                );
-                // Replace the value's buffer slice (which starts with the value itself) with the
-                // buffer slice we created that begins with the field name.
-                value.input = input_including_field_name;
-                Some(LazyRawTextField_1_0 {
-                    value: value.into(),
-                })
+            Self::match_struct_field_name_and_value.map(move |(matched_field_name, value)| {
+                let field_name = LazyRawTextFieldName_1_0::new(matched_field_name);
+                let field_value = LazyRawTextValue_1_0::new(value);
+                Some(LazyRawFieldExpr::<'top, TextEncoding_1_0>::new(
+                    field_name,
+                    RawValueExpr::ValueLiteral(field_value),
+                ))
             }),
         ))(input_including_field_name)
     }
@@ -433,7 +433,7 @@ impl<'top> TextBufferView<'top> {
     ) -> IonParseResult<
         'top,
         (
-            MatchedFieldName,
+            MatchedFieldName<'top>,
             MatchedRawTextValue<'top, TextEncoding_1_0>,
         ),
     > {
@@ -462,46 +462,14 @@ impl<'top> TextBufferView<'top> {
             // If the next thing in the input is a `}`, return `None`.
             Self::match_struct_end.map(|_| Ok(None)),
             Self::match_struct_field_name_and_e_expression_1_1.map(|(field_name, invocation)| {
-                // TODO: We're discarding the name encoding information here. When we revise our field name
-                //       storage strategy[1], we should make sure to capture this for tooling's sake.
-                //       [1]: https://github.com/amazon-ion/ion-rust/issues/631
-                let name_bytes = self.slice(
-                    field_name.span().start - self.offset(),
-                    field_name.span().len(),
-                );
-                let name = match field_name.read(self.allocator, name_bytes) {
-                    Ok(name) => name,
-                    Err(e) => {
-                        let error = InvalidInputError::new(name_bytes).with_description(format!(
-                            "failed to read field name associated with e-expression: {e:?}"
-                        ));
-                        return Err(nom::Err::Error(IonParseError::Invalid(error)));
-                    }
-                };
                 Ok(Some(RawFieldExpr::new(
-                    name,
+                    LazyRawTextFieldName_1_1::new(field_name),
                     RawValueExpr::MacroInvocation(invocation),
                 )))
             }),
             // Otherwise, match a name/value pair and turn it into a `LazyRawTextField`.
             Self::match_struct_field_name_and_value_1_1.map(move |(field_name, mut value)| {
-                // Add the field name offsets to the `EncodedTextValue`
-                value.encoded_value = value.encoded_value.with_field_name(
-                    field_name.syntax(),
-                    field_name.span().start,
-                    field_name.span().len(),
-                );
-                // Replace the value's buffer slice (which starts with the value itself) with the
-                // buffer slice we created that begins with the field name.
-                value.input = input_including_field_name;
-                let field_name = match value.field_name() {
-                    Ok(name) => name,
-                    Err(e) => {
-                        let error = InvalidInputError::new(self)
-                            .with_description(format!("failed to struct field name: {e:?}"));
-                        return Err(nom::Err::Error(IonParseError::Invalid(error)));
-                    }
-                };
+                let field_name = LazyRawTextFieldName_1_1::new(field_name);
                 let field_value = LazyRawTextValue_1_1::new(value);
                 Ok(Some(RawFieldExpr::new(
                     field_name,
@@ -517,7 +485,7 @@ impl<'top> TextBufferView<'top> {
     /// range of input bytes where the field name is found, and the value.
     pub fn match_struct_field_name_and_e_expression_1_1(
         self,
-    ) -> IonParseResult<'top, (MatchedFieldName, RawTextEExpression_1_1<'top>)> {
+    ) -> IonParseResult<'top, (MatchedFieldName<'top>, RawTextEExpression_1_1<'top>)> {
         terminated(
             separated_pair(
                 whitespace_and_then(Self::match_struct_field_name),
@@ -536,7 +504,7 @@ impl<'top> TextBufferView<'top> {
     ) -> IonParseResult<
         'top,
         (
-            MatchedFieldName,
+            MatchedFieldName<'top>,
             MatchedRawTextValue<'top, TextEncoding_1_1>,
         ),
     > {
@@ -597,12 +565,12 @@ impl<'top> TextBufferView<'top> {
     /// * An identifier
     /// * A symbol ID
     /// * A short-form string
-    pub fn match_struct_field_name(self) -> IonParseResult<'top, MatchedFieldName> {
-        match_and_span(alt((
+    pub fn match_struct_field_name(self) -> IonParseResult<'top, MatchedFieldName<'top>> {
+        consumed(alt((
             Self::match_string.map(MatchedFieldNameSyntax::String),
             Self::match_symbol.map(MatchedFieldNameSyntax::Symbol),
         )))
-        .map(|(syntax, span)| MatchedFieldName::new(syntax, span))
+        .map(|(matched_inpet, syntax)| MatchedFieldName::new(matched_inpet, syntax))
         .parse(self)
     }
 

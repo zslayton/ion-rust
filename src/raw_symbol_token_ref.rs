@@ -1,5 +1,5 @@
 use crate::raw_symbol_token::RawSymbolToken;
-use crate::{Symbol, SymbolId};
+use crate::{Symbol, SymbolId, SymbolRef};
 
 /// Like RawSymbolToken, but the Text variant holds a borrowed reference instead of a String.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -103,6 +103,15 @@ impl<'a> From<SymbolId> for RawSymbolTokenRef<'a> {
 impl<'a> From<&'a SymbolId> for RawSymbolTokenRef<'a> {
     fn from(value: &'a SymbolId) -> Self {
         RawSymbolTokenRef::SymbolId(*value)
+    }
+}
+
+impl<'a> From<SymbolRef<'a>> for RawSymbolTokenRef<'a> {
+    fn from(value: SymbolRef<'a>) -> Self {
+        match value.text() {
+            None => RawSymbolTokenRef::SymbolId(0),
+            Some(text) => RawSymbolTokenRef::Text(text),
+        }
     }
 }
 

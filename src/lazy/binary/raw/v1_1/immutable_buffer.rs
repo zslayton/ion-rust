@@ -63,7 +63,7 @@ impl<'a> ImmutableBuffer<'a> {
     }
 
     /// Returns a slice containing all of the buffer's bytes.
-    pub fn bytes(&self) -> &[u8] {
+    pub fn bytes(&self) -> &'a [u8] {
         self.data
     }
 
@@ -311,9 +311,6 @@ impl<'a> ImmutableBuffer<'a> {
 
         let encoded_value = EncodedValue {
             header,
-            // If applicable, these are populated by the caller: `peek_field()`
-            field_id_length: 0,
-            field_id: None,
             // If applicable, these are populated by the caller: `read_annotated_value()`
             annotations_header_length: 0,
             annotations_sequence_length: 0,

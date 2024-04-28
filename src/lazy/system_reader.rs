@@ -182,7 +182,7 @@ impl<Encoding: LazyDecoder, Input: IonInput> LazySystemReader<Encoding, Input> {
 
         for field_result in symbol_table.iter() {
             let field = field_result?;
-            if field.raw_name().matches_sid_or_text(7, "symbols") {
+            if field.name().read_raw()?.matches_sid_or_text(7, "symbols") {
                 if found_symbols_field {
                     return IonResult::decoding_error(
                         "found symbol table with multiple 'symbols' fields",
@@ -191,7 +191,7 @@ impl<Encoding: LazyDecoder, Input: IonInput> LazySystemReader<Encoding, Input> {
                 found_symbols_field = true;
                 Self::process_symbols(pending_lst, field.value())?;
             }
-            if field.raw_name().matches_sid_or_text(6, "imports") {
+            if field.name().read_raw()?.matches_sid_or_text(6, "imports") {
                 if found_imports_field {
                     return IonResult::decoding_error(
                         "found symbol table with multiple 'imports' fields",
@@ -208,7 +208,7 @@ impl<Encoding: LazyDecoder, Input: IonInput> LazySystemReader<Encoding, Input> {
     // Store any strings defined in the `symbols` field in the `PendingLst` for future application.
     fn process_symbols(
         pending_lst: &mut PendingLst,
-        symbols: &LazyExpandedValue<'_, Encoding>,
+        symbols: LazyExpandedValue<'_, Encoding>,
     ) -> IonResult<()> {
         if let ExpandedValueRef::List(list) = symbols.read()? {
             for symbol_text_result in list.iter() {
@@ -226,7 +226,7 @@ impl<Encoding: LazyDecoder, Input: IonInput> LazySystemReader<Encoding, Input> {
     // Check for `imports: $ion_symbol_table`.
     fn process_imports(
         pending_lst: &mut PendingLst,
-        imports: &LazyExpandedValue<'_, Encoding>,
+        imports: LazyExpandedValue<'_, Encoding>,
     ) -> IonResult<()> {
         match imports.read()? {
             ExpandedValueRef::Symbol(symbol_ref) => {

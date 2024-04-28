@@ -4,16 +4,20 @@ use crate::binary::uint::DecodedUInt;
 use crate::binary::var_int::VarInt;
 use crate::binary::var_uint::VarUInt;
 use crate::lazy::binary::encoded_value::EncodedValue;
+use crate::lazy::binary::raw::r#struct::LazyRawBinaryFieldName_1_0;
 use crate::lazy::binary::raw::type_descriptor::{Header, TypeDescriptor, ION_1_0_TYPE_DESCRIPTORS};
 use crate::lazy::binary::raw::value::LazyRawBinaryValue_1_0;
+use crate::lazy::decoder::{LazyRawFieldExpr, LazyRawValueExpr, RawFieldExpr, RawValueExpr};
 use crate::lazy::encoder::binary::v1_1::flex_int::FlexInt;
 use crate::lazy::encoder::binary::v1_1::flex_uint::FlexUInt;
+use crate::lazy::encoding::BinaryEncoding_1_0;
 use crate::result::IonFailure;
 use crate::types::UInt;
 use crate::{Int, IonError, IonResult, IonType};
 use num_bigint::{BigInt, BigUint, Sign};
 use std::fmt::{Debug, Formatter};
 use std::mem;
+use std::ops::Range;
 
 // This limit is used for stack-allocating buffer space to encode/decode UInts.
 const UINT_STACK_BUFFER_SIZE: usize = 16;
@@ -69,7 +73,7 @@ impl<'a> ImmutableBuffer<'a> {
     }
 
     /// Returns a slice containing all of the buffer's bytes.
-    pub fn bytes(&self) -> &[u8] {
+    pub fn bytes(&self) -> &'a [u8] {
         self.data
     }
 
@@ -98,6 +102,10 @@ impl<'a> ImmutableBuffer<'a> {
     /// Returns the number of bytes in the buffer.
     pub fn len(&self) -> usize {
         self.data.len()
+    }
+
+    pub fn range(&self) -> Range<usize> {
+        self.offset..self.offset + self.len()
     }
 
     /// Returns `true` if there are no bytes in the buffer. Otherwise, returns `false`.
@@ -607,7 +615,7 @@ impl<'a> ImmutableBuffer<'a> {
     }
 
     /// Reads a field ID and a value from the buffer.
-    pub(crate) fn peek_field(self) -> IonResult<Option<LazyRawBinaryValue_1_0<'a>>> {
+    pub(crate) fn peek_field(self) -> IonResult<Option<LazyRawFieldExpr<'a, BinaryEncoding_1_0>>> {
         let mut input = self;
         if self.is_empty() {
             // We're at the end of the struct
@@ -621,6 +629,11 @@ impl<'a> ImmutableBuffer<'a> {
                 input_after_field_id.offset(),
             );
         }
+
+        let field_id = field_id_var_uint.value();
+        // let field_id_span = &input.bytes()[..field_id_var_uint.size_in_bytes()];
+        let matched_field_id = input.slice(0, field_id_var_uint.size_in_bytes());
+        let field_name = LazyRawBinaryFieldName_1_0::new(field_id, matched_field_id);
 
         let mut type_descriptor = input_after_field_id.peek_type_descriptor()?;
         if type_descriptor.is_nop() {
@@ -643,15 +656,11 @@ impl<'a> ImmutableBuffer<'a> {
             };
         }
 
-        let field_id_length = field_id_var_uint.size_in_bytes() as u8;
-        let field_id = field_id_var_uint.value();
-
-        let mut value = input_after_field_id.read_value(type_descriptor)?;
-        value.encoded_value.field_id = Some(field_id);
-        value.encoded_value.field_id_length = field_id_length;
-        value.encoded_value.total_length += field_id_length as usize;
-        value.input = input;
-        Ok(Some(value))
+        let field_value = input_after_field_id.read_value(type_descriptor)?;
+        Ok(Some(RawFieldExpr::new(
+            field_name,
+            RawValueExpr::ValueLiteral(field_value),
+        )))
     }
 
     #[cold]
@@ -745,9 +754,6 @@ impl<'a> ImmutableBuffer<'a> {
 
         let encoded_value = EncodedValue {
             header,
-            // If applicable, these are populated by the caller: `peek_field()`
-            field_id_length: 0,
-            field_id: None,
             // If applicable, these are populated by the caller: `read_annotated_value()`
             annotations_header_length: 0,
             annotations_sequence_length: 0,

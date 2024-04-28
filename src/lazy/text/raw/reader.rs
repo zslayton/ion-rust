@@ -109,7 +109,7 @@ impl<'data> LazyRawReader<'data, TextEncoding_1_0> for LazyRawTextReader_1_0<'da
 
 #[cfg(test)]
 mod tests {
-    use crate::lazy::decoder::{LazyRawStruct, LazyRawValue};
+    use crate::lazy::decoder::{HasRange, HasSpan, LazyRawFieldName, LazyRawStruct, LazyRawValue};
     use crate::lazy::raw_value_ref::RawValueRef;
     use crate::raw_symbol_token_ref::AsRawSymbolTokenRef;
     use crate::{Decimal, IonType, RawSymbolTokenRef, Timestamp};
@@ -437,17 +437,17 @@ mod tests {
         let mut fields = strukt.iter();
         sum += {
             let (name, value) = fields.next().unwrap()?.expect_name_value()?;
-            assert_eq!(name, "foo".as_raw_symbol_token_ref());
+            assert_eq!(name.read()?, "foo".as_raw_symbol_token_ref());
             value.read()?.expect_i64()?
         };
         sum += {
             let (name, value) = fields.next().unwrap()?.expect_name_value()?;
-            assert_eq!(name, "bar".as_raw_symbol_token_ref());
+            assert_eq!(name.read()?, "bar".as_raw_symbol_token_ref());
             value.read()?.expect_i64()?
         };
         sum += {
             let (name, value) = fields.next().unwrap()?.expect_name_value()?;
-            assert_eq!(name, "baz".as_raw_symbol_token_ref());
+            assert_eq!(name.read()?, "baz".as_raw_symbol_token_ref());
             value.read()?.expect_i64()?
         };
         assert_eq!(sum, 600);

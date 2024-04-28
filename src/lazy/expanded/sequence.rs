@@ -329,6 +329,7 @@ fn expand_next_sequence_value<'top, D: LazyDecoder>(
                 return Some(Ok(LazyExpandedValue {
                     source: ExpandedValueSource::ValueLiteral(value),
                     context,
+                    variable: None,
                 }))
             }
             Some(Ok(RawValueExpr::MacroInvocation(invocation))) => {

@@ -4,8 +4,8 @@ use std::fmt;
 use std::fmt::{Debug, Formatter};
 use std::ops::Range;
 
-use crate::lazy::decoder::private::{LazyContainerPrivate, LazyRawValuePrivate};
-use crate::lazy::decoder::{LazyDecoder, LazyRawValue};
+use crate::lazy::decoder::private::LazyContainerPrivate;
+use crate::lazy::decoder::{HasRange, HasSpan, LazyDecoder, LazyRawValue};
 use crate::lazy::encoding::{TextEncoding, TextEncoding_1_0, TextEncoding_1_1};
 use crate::lazy::raw_value_ref::RawValueRef;
 use crate::lazy::text::buffer::TextBufferView;
@@ -80,19 +80,26 @@ impl<'top> From<MatchedRawTextValue<'top, TextEncoding_1_1>> for LazyRawTextValu
     }
 }
 
-impl<'top, E: TextEncoding<'top>> LazyRawValuePrivate<'top> for MatchedRawTextValue<'top, E> {
-    // TODO: We likely want to move this functionality to the Ion-version-specific LazyDecoder::Field
-    //       implementations. See: https://github.com/amazon-ion/ion-rust/issues/631
-    fn field_name(&self) -> IonResult<RawSymbolTokenRef<'top>> {
-        self.encoded_value
-            .field_name(self.input.allocator, self.input)
-    }
-}
-
 // ===== Ion-version-agnostic functionality =====
 //
 // These trait impls are common to all Ion versions, but require the caller to specify a type
 // parameter.
+
+impl<'top, E: TextEncoding<'top>> HasRange for MatchedRawTextValue<'top, E> {
+    fn range(&self) -> Range<usize> {
+        self.encoded_value.annotated_value_range()
+    }
+}
+
+impl<'top, E: TextEncoding<'top>> HasSpan<'top> for MatchedRawTextValue<'top, E> {
+    fn span(&self) -> &'top [u8] {
+        let range = self.range();
+        let input_offset = self.input.offset();
+        let local_range = (range.start - input_offset)..(range.end - input_offset);
+        &self.input.bytes()[local_range]
+    }
+}
+
 impl<'top, E: TextEncoding<'top>> LazyRawValue<'top, E> for MatchedRawTextValue<'top, E> {
     fn ion_type(&self) -> IonType {
         self.encoded_value.ion_type()
@@ -139,22 +146,17 @@ impl<'top, E: TextEncoding<'top>> LazyRawValue<'top, E> for MatchedRawTextValue<
         };
         Ok(value_ref)
     }
+}
 
+impl<'top, E: TextEncoding<'top>> HasRange for LazyRawTextValue<'top, E> {
     fn range(&self) -> Range<usize> {
-        self.encoded_value.annotated_value_range()
-    }
-
-    fn span(&self) -> &[u8] {
-        let range = self.range();
-        let input_offset = self.input.offset();
-        let local_range = (range.start - input_offset)..(range.end - input_offset);
-        &self.input.bytes()[local_range]
+        self.matched.range()
     }
 }
 
-impl<'top, E: TextEncoding<'top>> LazyRawValuePrivate<'top> for LazyRawTextValue<'top, E> {
-    fn field_name(&self) -> IonResult<RawSymbolTokenRef<'top>> {
-        self.matched.field_name()
+impl<'top, E: TextEncoding<'top>> HasSpan<'top> for LazyRawTextValue<'top, E> {
+    fn span(&self) -> &'top [u8] {
+        self.matched.span()
     }
 }
 
@@ -173,14 +175,6 @@ impl<'top, E: TextEncoding<'top>> LazyRawValue<'top, E> for LazyRawTextValue<'to
 
     fn read(&self) -> IonResult<RawValueRef<'top, E>> {
         self.matched.read()
-    }
-
-    fn range(&self) -> Range<usize> {
-        self.matched.range()
-    }
-
-    fn span(&self) -> &[u8] {
-        self.matched.span()
     }
 }
 

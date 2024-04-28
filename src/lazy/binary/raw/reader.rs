@@ -2,7 +2,9 @@
 
 use crate::lazy::binary::immutable_buffer::ImmutableBuffer;
 use crate::lazy::binary::raw::value::LazyRawBinaryValue_1_0;
-use crate::lazy::decoder::{LazyDecoder, LazyRawReader};
+use crate::lazy::decoder::{
+    HasRange, LazyDecoder, LazyRawFieldExpr, LazyRawFieldName, LazyRawReader,
+};
 use crate::lazy::encoding::BinaryEncoding_1_0;
 use crate::lazy::raw_stream_item::{LazyRawStreamItem, RawStreamItem};
 use crate::result::IonFailure;
@@ -168,7 +170,7 @@ impl<'data> DataSource<'data> {
     /// If it succeeds, marks the `DataSource` as ready to advance by the 'n' bytes
     /// that were consumed.
     /// If it does not succeed, the `DataSource` remains unchanged.
-    pub(crate) fn try_parse_next<
+    pub(crate) fn try_parse_next_value<
         F: Fn(ImmutableBuffer<'data>) -> IonResult<Option<LazyRawBinaryValue_1_0<'data>>>,
     >(
         &mut self,
@@ -188,12 +190,41 @@ impl<'data> DataSource<'data> {
         self.bytes_to_skip = lazy_value.encoded_value.total_length();
         Ok(Some(lazy_value))
     }
+
+    /// Runs the provided parsing function on this DataSource's buffer.
+    /// If it succeeds, marks the `DataSource` as ready to advance by the 'n' bytes
+    /// that were consumed.
+    /// If it does not succeed, the `DataSource` remains unchanged.
+    pub(crate) fn try_parse_next_field<
+        F: Fn(
+            ImmutableBuffer<'data>,
+        ) -> IonResult<Option<LazyRawFieldExpr<'data, BinaryEncoding_1_0>>>,
+    >(
+        &mut self,
+        parser: F,
+    ) -> IonResult<Option<LazyRawFieldExpr<'data, BinaryEncoding_1_0>>> {
+        let buffer = self.advance_to_next_item()?;
+
+        let field = match parser(buffer) {
+            Ok(Some(output)) => output,
+            Ok(None) => return Ok(None),
+            Err(e) => return Err(e),
+        };
+
+        // If the field name we read doesn't start where we began reading, there was a NOP field.
+        let num_nop_bytes = field.name().range().start - buffer.offset();
+        self.buffer = buffer.consume(num_nop_bytes);
+        self.bytes_to_skip = field.value_expr().range().end - self.buffer.offset();
+        // self.bytes_to_skip = field.encoded_value.total_length();
+        Ok(Some(field))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::lazy::binary::raw::reader::LazyRawBinaryReader_1_0;
     use crate::lazy::binary::test_utilities::to_binary_ion;
+    use crate::lazy::decoder::LazyRawFieldName;
     use crate::lazy::raw_stream_item::RawStreamItem;
     use crate::raw_symbol_token_ref::AsRawSymbolTokenRef;
     use crate::{IonResult, IonType, RawSymbolTokenRef};
@@ -212,7 +243,7 @@ mod tests {
         let lazy_struct = value.read()?.expect_struct()?;
         let mut fields = lazy_struct.iter();
         let (name, _value) = fields.next().expect("field 1")?.expect_name_value()?;
-        assert_eq!(name, 4.as_raw_symbol_token_ref()); // 'name'
+        assert_eq!(name.read()?, 4.as_raw_symbol_token_ref()); // 'name'
         Ok(())
     }
 

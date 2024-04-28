@@ -10,8 +10,7 @@ use crate::lazy::binary::raw::sequence::{
     LazyRawBinaryList_1_0, LazyRawBinarySExp_1_0, LazyRawBinarySequence_1_0,
 };
 use crate::lazy::binary::raw::type_descriptor::Header;
-use crate::lazy::decoder::private::LazyRawValuePrivate;
-use crate::lazy::decoder::LazyRawValue;
+use crate::lazy::decoder::{HasRange, HasSpan, LazyRawValue};
 use crate::lazy::encoding::BinaryEncoding_1_0;
 use crate::lazy::raw_value_ref::RawValueRef;
 use crate::lazy::str_ref::StrRef;
@@ -50,15 +49,18 @@ impl<'top> Debug for LazyRawBinaryValue_1_0<'top> {
 
 pub type ValueParseResult<'top, F> = IonResult<RawValueRef<'top, F>>;
 
-impl<'top> LazyRawValuePrivate<'top> for LazyRawBinaryValue_1_0<'top> {
-    fn field_name(&self) -> IonResult<RawSymbolTokenRef<'top>> {
-        if let Some(field_id) = self.encoded_value.field_id {
-            Ok(RawSymbolTokenRef::SymbolId(field_id))
-        } else {
-            IonResult::illegal_operation(
-                "requested field name, but value was not in a struct field",
-            )
-        }
+impl<'top> HasSpan<'top> for LazyRawBinaryValue_1_0<'top> {
+    fn span(&self) -> &'top [u8] {
+        let range = self.range();
+        // Subtract the `offset()` of the ImmutableBuffer to get the local indexes for start/end
+        let local_range = (range.start - self.input.offset())..(range.end - self.input.offset());
+        &self.input.bytes()[local_range]
+    }
+}
+
+impl<'top> HasRange for LazyRawBinaryValue_1_0<'top> {
+    fn range(&self) -> Range<usize> {
+        self.encoded_value.annotated_value_range()
     }
 }
 
@@ -77,17 +79,6 @@ impl<'top> LazyRawValue<'top, BinaryEncoding_1_0> for LazyRawBinaryValue_1_0<'to
 
     fn read(&self) -> IonResult<RawValueRef<'top, BinaryEncoding_1_0>> {
         self.read()
-    }
-
-    fn range(&self) -> Range<usize> {
-        self.encoded_value.annotated_value_range()
-    }
-
-    fn span(&self) -> &[u8] {
-        let range = self.range();
-        // Subtract the `offset()` of the ImmutableBuffer to get the local indexes for start/end
-        let local_range = (range.start - self.input.offset())..(range.end - self.input.offset());
-        &self.input.bytes()[local_range]
     }
 }
 
@@ -121,17 +112,11 @@ impl<'top> LazyRawBinaryValue_1_0<'top> {
             });
         let (sequence_offset, sequence_length) = match offset_and_length {
             None => {
+                // If there are no annotations, return an empty slice positioned on the type
+                // descriptor.
                 return self
                     .input
-                    // A value's binary layout is:
-                    //
-                    //     field_id? | annotation_sequence? | type_descriptor | length? | body
-                    //
-                    // If this value has no annotation sequence, then the first byte after the
-                    // field ID is the type descriptor.
-                    //
-                    // If there is no field ID, field_id_length will be zero.
-                    .slice(self.encoded_value.field_id_length as usize, 0);
+                    .slice(0, 0);
             }
             Some(offset_and_length) => offset_and_length,
         };
@@ -198,12 +183,6 @@ impl<'top> LazyRawBinaryValue_1_0<'top> {
         let bytes_needed = std::cmp::min(self.input.len() - value_offset, value_body_length);
         let buffer_slice = self.input.slice(value_offset, bytes_needed);
         buffer_slice
-    }
-
-    /// If this value is within a struct, returns its associated field name as a `Some(SymbolID)`.
-    /// Otherwise, returns `None`.
-    pub(crate) fn field_id(&self) -> Option<SymbolId> {
-        self.encoded_value.field_id
     }
 
     /// Helper method called by [`Self::read`]. Reads the current value as a bool.

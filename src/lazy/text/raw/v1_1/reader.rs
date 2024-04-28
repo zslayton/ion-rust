@@ -8,8 +8,8 @@ use nom::character::streaming::satisfy;
 
 use crate::lazy::decoder::private::LazyContainerPrivate;
 use crate::lazy::decoder::{
-    LazyDecoder, LazyRawFieldExpr, LazyRawReader, LazyRawSequence, LazyRawStruct, LazyRawValue,
-    LazyRawValueExpr, RawValueExpr,
+    HasRange, HasSpan, LazyDecoder, LazyRawFieldExpr, LazyRawFieldName, LazyRawReader,
+    LazyRawSequence, LazyRawStruct, LazyRawValue, LazyRawValueExpr, RawValueExpr,
 };
 use crate::lazy::encoding::TextEncoding_1_1;
 use crate::lazy::raw_stream_item::{LazyRawStreamItem, RawStreamItem};
@@ -17,10 +17,10 @@ use crate::lazy::text::buffer::TextBufferView;
 use crate::lazy::text::parse_result::{AddContext, ToIteratorOutput};
 use crate::lazy::text::value::{LazyRawTextValue_1_1, RawTextAnnotationsIterator};
 use crate::result::IonFailure;
-use crate::{IonResult, IonType};
+use crate::{IonResult, IonType, RawSymbolTokenRef};
 
 use crate::lazy::expanded::macro_evaluator::RawEExpression;
-use crate::lazy::text::matched::MatchedValue;
+use crate::lazy::text::matched::{MatchedFieldName, MatchedValue};
 use bumpalo::collections::Vec as BumpVec;
 use bumpalo::Bump as BumpAllocator;
 
@@ -72,6 +72,18 @@ pub struct RawTextEExpression_1_1<'top> {
     pub(crate) input: TextBufferView<'top>,
     pub(crate) id: MacroIdRef<'top>,
     pub(crate) arg_expr_cache: &'top [LazyRawValueExpr<'top, TextEncoding_1_1>],
+}
+
+impl<'top> HasSpan<'top> for RawTextEExpression_1_1<'top> {
+    fn span(&self) -> &'top [u8] {
+        self.input.bytes()
+    }
+}
+
+impl<'top> HasRange for RawTextEExpression_1_1<'top> {
+    fn range(&self) -> Range<usize> {
+        self.input.range()
+    }
 }
 
 impl<'top> RawEExpression<'top, TextEncoding_1_1> for RawTextEExpression_1_1<'top> {
@@ -465,6 +477,35 @@ impl<'top> Iterator for RawTextSExpIterator_1_1<'top> {
     }
 }
 
+#[derive(Debug, Copy, Clone)]
+pub struct LazyRawTextFieldName_1_1<'top> {
+    matched: MatchedFieldName<'top>,
+}
+
+impl<'top> LazyRawTextFieldName_1_1<'top> {
+    pub fn new(matched: MatchedFieldName<'top>) -> Self {
+        Self { matched }
+    }
+}
+
+impl<'top> HasSpan<'top> for LazyRawTextFieldName_1_1<'top> {
+    fn span(&self) -> &'top [u8] {
+        self.matched.span()
+    }
+}
+
+impl<'top> HasRange for LazyRawTextFieldName_1_1<'top> {
+    fn range(&self) -> Range<usize> {
+        self.matched.range()
+    }
+}
+
+impl<'top> LazyRawFieldName<'top> for LazyRawTextFieldName_1_1<'top> {
+    fn read(&self) -> IonResult<RawSymbolTokenRef<'top>> {
+        self.matched.read()
+    }
+}
+
 #[derive(Copy, Clone)]
 pub struct LazyRawTextStruct_1_1<'top> {
     pub(crate) value: LazyRawTextValue_1_1<'top>,
@@ -525,8 +566,8 @@ impl<'top> Iterator for RawTextStructCacheIterator_1_1<'top> {
     fn next(&mut self) -> Option<Self::Item> {
         let next_expr = self.field_exprs.get(self.index)?;
         self.index += 1;
-        // TODO: Remove the result wrapper
-        Some(Ok(next_expr.clone()))
+        // TODO: Remove the result wrapper because these values are already in the cache
+        Some(Ok(*next_expr))
     }
 }
 
