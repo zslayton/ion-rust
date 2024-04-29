@@ -42,8 +42,8 @@ use sequence::{LazyExpandedList, LazyExpandedSExp};
 
 use crate::element::iterators::SymbolsIterator;
 use crate::lazy::bytes_ref::BytesRef;
-use crate::lazy::decoder::{LazyDecoder, LazyRawFieldName, LazyRawValue};
-use crate::lazy::encoding::{Encoding, RawValueLiteral};
+use crate::lazy::decoder::{LazyDecoder, LazyRawValue};
+use crate::lazy::encoding::RawValueLiteral;
 use crate::lazy::expanded::compiler::TemplateCompiler;
 use crate::lazy::expanded::macro_evaluator::{MacroEvaluator, RawEExpression};
 use crate::lazy::expanded::macro_table::MacroTable;
@@ -63,9 +63,7 @@ use crate::lazy::text::raw::v1_1::reader::MacroAddress;
 use crate::lazy::value::LazyValue;
 use crate::raw_symbol_token_ref::AsRawSymbolTokenRef;
 use crate::result::IonFailure;
-use crate::{
-    Decimal, Int, IonResult, IonType, RawSymbolTokenRef, SymbolRef, SymbolTable, Timestamp,
-};
+use crate::{Decimal, Int, IonResult, IonType, RawSymbolTokenRef, SymbolTable, Timestamp};
 
 // All of these modules (and most of their types) are currently `pub` as the lazy reader is gated
 // behind an experimental feature flag. We may constrain access to them in the future as the code
@@ -484,7 +482,7 @@ impl<'top, V: RawValueLiteral, Encoding: LazyDecoder<Value<'top> = V>> From<V>
 
 /// A variable found in the body of a template macro.
 #[derive(Debug, Copy, Clone)]
-pub(crate) struct TemplateVariableReference<'top> {
+pub struct TemplateVariableReference<'top> {
     template: TemplateMacroRef<'top>,
     signature_index: usize,
 }

@@ -483,7 +483,7 @@ pub struct LazyRawTextFieldName_1_1<'top> {
 }
 
 impl<'top> LazyRawTextFieldName_1_1<'top> {
-    pub fn new(matched: MatchedFieldName<'top>) -> Self {
+    pub(crate) fn new(matched: MatchedFieldName<'top>) -> Self {
         Self { matched }
     }
 }

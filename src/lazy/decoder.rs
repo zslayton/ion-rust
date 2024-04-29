@@ -7,7 +7,6 @@ use crate::lazy::encoding::RawValueLiteral;
 use crate::lazy::expanded::macro_evaluator::RawEExpression;
 use crate::lazy::raw_stream_item::LazyRawStreamItem;
 use crate::lazy::raw_value_ref::RawValueRef;
-use crate::lazy::text::raw::v1_1::reader::LazyRawTextFieldName_1_1;
 use crate::result::IonFailure;
 use crate::{IonResult, IonType, RawSymbolTokenRef};
 

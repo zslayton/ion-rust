@@ -1,5 +1,6 @@
 #![allow(non_camel_case_types)]
 
+use crate::{IonResult, RawSymbolTokenRef, SymbolId};
 use std::fmt;
 use std::fmt::{Debug, Formatter};
 use std::ops::Range;
@@ -11,10 +12,8 @@ use crate::lazy::binary::raw::value::LazyRawBinaryValue_1_0;
 use crate::lazy::decoder::private::LazyContainerPrivate;
 use crate::lazy::decoder::{
     HasRange, HasSpan, LazyRawFieldExpr, LazyRawFieldName, LazyRawStruct, RawFieldExpr,
-    RawValueExpr,
 };
 use crate::lazy::encoding::BinaryEncoding_1_0;
-use crate::{IonResult, RawSymbolTokenRef, SymbolId, VarUInt};
 
 #[derive(Copy, Clone)]
 pub struct LazyRawBinaryStruct_1_0<'top> {
@@ -156,7 +155,6 @@ mod tests {
             ), // {name: ""}
         ];
         for (input, field_name_ranges) in tests {
-            let bump = bumpalo::Bump::new();
             let mut reader = LazyRawBinaryReader_1_0::new(input);
             let struct_ = reader.next()?.expect_value()?.read()?.expect_struct()?;
             for (field_result, (name, range)) in struct_.iter().zip(field_name_ranges.iter()) {

@@ -9,10 +9,7 @@ use crate::lazy::binary::raw::v1_1::{
     immutable_buffer::ImmutableBuffer, value::LazyRawBinaryValue_1_1,
 };
 use crate::lazy::decoder::private::LazyContainerPrivate;
-use crate::lazy::decoder::{
-    HasRange, HasSpan, LazyRawFieldExpr, LazyRawFieldName, LazyRawStruct, RawFieldExpr,
-    RawValueExpr,
-};
+use crate::lazy::decoder::{HasRange, HasSpan, LazyRawFieldExpr, LazyRawFieldName, LazyRawStruct};
 use crate::lazy::encoding::BinaryEncoding_1_1;
 use crate::{IonResult, RawSymbolTokenRef};
 

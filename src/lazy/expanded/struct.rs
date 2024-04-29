@@ -1,25 +1,20 @@
 use std::ops::ControlFlow;
 
 use crate::element::iterators::SymbolsIterator;
-use crate::lazy::decoder::{
-    LazyDecoder, LazyRawFieldExpr, LazyRawFieldName, LazyRawStruct, RawFieldExpr, RawValueExpr,
-};
-
 use crate::lazy::decoder::private::{LazyRawStructPrivate, RawStructUnexpandedFieldsIterator};
+use crate::lazy::decoder::{LazyDecoder, LazyRawFieldName, LazyRawStruct};
 use crate::lazy::expanded::macro_evaluator::{
     MacroEvaluator, MacroExpr, RawEExpression, ValueExpr,
 };
 use crate::lazy::expanded::sequence::Environment;
 use crate::lazy::expanded::template::{
-    AnnotationsRange, ExprRange, TemplateBodyValueExpr, TemplateElement, TemplateMacro,
-    TemplateMacroInvocation, TemplateMacroRef, TemplateStructIndex,
-    TemplateStructUnexpandedFieldsIterator,
+    AnnotationsRange, ExprRange, TemplateBodyValueExpr, TemplateElement, TemplateMacroInvocation,
+    TemplateMacroRef, TemplateStructIndex, TemplateStructUnexpandedFieldsIterator,
 };
 use crate::lazy::expanded::{
     EncodingContext, ExpandedAnnotationsIterator, ExpandedAnnotationsSource, ExpandedValueRef,
     ExpandedValueSource, LazyExpandedValue, TemplateVariableReference,
 };
-use crate::raw_symbol_token_ref::AsRawSymbolTokenRef;
 use crate::result::IonFailure;
 use crate::symbol_ref::AsSymbolRef;
 use crate::{IonError, IonResult, RawSymbolTokenRef, SymbolRef};
@@ -96,7 +91,7 @@ impl<'top, D: LazyDecoder> LazyExpandedField<'top, D> {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) enum LazyExpandedFieldName<'top, D: LazyDecoder> {
+pub enum LazyExpandedFieldName<'top, D: LazyDecoder> {
     RawName(EncodingContext<'top>, D::FieldName<'top>),
     TemplateName(TemplateMacroRef<'top>, SymbolRef<'top>),
     // TODO: `Constructed` needed for names in `(make_struct ...)`

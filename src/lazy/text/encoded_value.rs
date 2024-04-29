@@ -1,10 +1,8 @@
-use crate::lazy::encoding::TextEncoding;
-use crate::lazy::text::buffer::TextBufferView;
-use crate::lazy::text::matched::{MatchedFieldNameSyntax, MatchedValue};
-use crate::{IonResult, IonType, RawSymbolTokenRef};
 use std::ops::Range;
 
-use bumpalo::Bump as BumpAllocator;
+use crate::lazy::encoding::TextEncoding;
+use crate::lazy::text::matched::MatchedValue;
+use crate::IonType;
 
 /// Represents the type, offset, and length metadata of the various components of an encoded value
 /// in a text input stream.
@@ -163,9 +161,9 @@ impl<'top, E: TextEncoding<'top>> EncodedTextValue<'top, E> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::lazy::encoding::TextEncoding_1_0;
-    use crate::lazy::text::matched::MatchedSymbol;
+
+    use super::*;
 
     #[test]
     fn total_length_data_only() {

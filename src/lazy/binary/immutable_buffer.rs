@@ -7,7 +7,7 @@ use crate::lazy::binary::encoded_value::EncodedValue;
 use crate::lazy::binary::raw::r#struct::LazyRawBinaryFieldName_1_0;
 use crate::lazy::binary::raw::type_descriptor::{Header, TypeDescriptor, ION_1_0_TYPE_DESCRIPTORS};
 use crate::lazy::binary::raw::value::LazyRawBinaryValue_1_0;
-use crate::lazy::decoder::{LazyRawFieldExpr, LazyRawValueExpr, RawFieldExpr, RawValueExpr};
+use crate::lazy::decoder::{LazyRawFieldExpr, RawFieldExpr, RawValueExpr};
 use crate::lazy::encoder::binary::v1_1::flex_int::FlexInt;
 use crate::lazy::encoder::binary::v1_1::flex_uint::FlexUInt;
 use crate::lazy::encoding::BinaryEncoding_1_0;
@@ -630,15 +630,10 @@ impl<'a> ImmutableBuffer<'a> {
             );
         }
 
-        let field_id = field_id_var_uint.value();
-        // let field_id_span = &input.bytes()[..field_id_var_uint.size_in_bytes()];
-        let matched_field_id = input.slice(0, field_id_var_uint.size_in_bytes());
-        let field_name = LazyRawBinaryFieldName_1_0::new(field_id, matched_field_id);
-
         let mut type_descriptor = input_after_field_id.peek_type_descriptor()?;
         if type_descriptor.is_nop() {
             // Read past NOP fields until we find the first one that's an actual value
-            // or we run out of struct bytes. Note that we read the NOP field(s) from `self` (the
+            // or we run out of struct bytes. Note that we read the NOP field(s) from `input` (the
             // initial input) rather than `input_after_field_id` because it simplifies
             // the logic of `read_struct_field_nop_pad()`, which is very rarely called.
             (field_id_var_uint, input_after_field_id) = match input.read_struct_field_nop_pad()? {
@@ -655,6 +650,10 @@ impl<'a> ImmutableBuffer<'a> {
                 }
             };
         }
+
+        let field_id = field_id_var_uint.value();
+        let matched_field_id = input.slice(0, field_id_var_uint.size_in_bytes());
+        let field_name = LazyRawBinaryFieldName_1_0::new(field_id, matched_field_id);
 
         let field_value = input_after_field_id.read_value(type_descriptor)?;
         Ok(Some(RawFieldExpr::new(

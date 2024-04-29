@@ -12,10 +12,7 @@ use crate::lazy::expanded::r#struct::{
 use crate::lazy::value::{AnnotationsIterator, LazyValue};
 use crate::lazy::value_ref::ValueRef;
 use crate::result::IonFailure;
-use crate::{
-    Annotations, Element, IntoAnnotatedElement, IonError, IonResult, RawSymbolTokenRef, Struct,
-    SymbolRef,
-};
+use crate::{Annotations, Element, IntoAnnotatedElement, IonError, IonResult, Struct, SymbolRef};
 
 /// An as-of-yet unread binary Ion struct. `LazyStruct` is immutable; its fields and annotations
 /// can be read any number of times.

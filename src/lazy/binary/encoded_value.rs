@@ -1,5 +1,4 @@
 use crate::lazy::binary::raw::type_descriptor::Header;
-use crate::types::SymbolId;
 use crate::IonType;
 use std::ops::Range;
 

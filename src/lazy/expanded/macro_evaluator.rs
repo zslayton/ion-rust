@@ -13,7 +13,6 @@
 #![allow(non_camel_case_types)]
 
 use std::fmt::{Debug, Formatter};
-use std::ops::Range;
 
 use bumpalo::collections::{String as BumpString, Vec as BumpVec};
 

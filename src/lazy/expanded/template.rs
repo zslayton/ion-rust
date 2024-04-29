@@ -3,16 +3,15 @@ use std::fmt;
 use std::fmt::{Debug, Formatter};
 use std::ops::{Deref, Range};
 
-use crate::lazy::decoder::{LazyDecoder, RawFieldExpr, RawValueExpr};
+use crate::{Bytes, Decimal, Int, IonResult, IonType, Str, Symbol, SymbolRef, Timestamp, Value};
+use crate::lazy::decoder::LazyDecoder;
+use crate::lazy::expanded::{EncodingContext, ExpandedValueSource, LazyExpandedValue, TemplateVariableReference};
 use crate::lazy::expanded::macro_evaluator::{MacroEvaluator, MacroExpr, ValueExpr};
 use crate::lazy::expanded::macro_table::MacroRef;
+use crate::lazy::expanded::r#struct::UnexpandedField;
 use crate::lazy::expanded::sequence::Environment;
-use crate::lazy::expanded::{EncodingContext, ExpandedValueSource, LazyExpandedValue, TemplateVariableReference};
 use crate::lazy::text::raw::v1_1::reader::{MacroAddress, MacroIdRef};
 use crate::result::IonFailure;
-use crate::{Bytes, Decimal, Int, IonResult, IonType, Str, Symbol, SymbolRef, Timestamp, Value};
-use crate::lazy::expanded::r#struct::UnexpandedField;
-use crate::symbol_ref::AsSymbolRef;
 
 /// A parameter in a user-defined macro's signature.
 #[derive(Debug, Clone)]
@@ -793,7 +792,7 @@ impl TemplateBodyVariableReference {
     }
     /// Pairs this variable reference with the given template macro reference, allowing information
     /// about the template definition to be retrieved later.
-    pub fn resolve<'top>(&self, template: TemplateMacroRef<'top>) -> TemplateVariableReference<'top> {
+    pub(crate) fn resolve<'top>(&self, template: TemplateMacroRef<'top>) -> TemplateVariableReference<'top> {
         TemplateVariableReference {
             template,
             signature_index: self.signature_index,

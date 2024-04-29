@@ -7,7 +7,7 @@ use nom::character::streaming::satisfy;
 use crate::lazy::decoder::private::LazyContainerPrivate;
 use crate::lazy::decoder::{
     HasRange, HasSpan, LazyRawFieldExpr, LazyRawFieldName, LazyRawStruct, LazyRawValue,
-    RawFieldExpr, RawValueExpr,
+    RawValueExpr,
 };
 use crate::lazy::encoding::TextEncoding_1_0;
 use crate::lazy::text::buffer::TextBufferView;
@@ -97,7 +97,7 @@ pub struct LazyRawTextFieldName_1_0<'top> {
 }
 
 impl<'top> LazyRawTextFieldName_1_0<'top> {
-    pub fn new(matched: MatchedFieldName<'top>) -> Self {
+    pub(crate) fn new(matched: MatchedFieldName<'top>) -> Self {
         Self { matched }
     }
 }

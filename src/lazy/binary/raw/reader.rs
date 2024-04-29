@@ -2,9 +2,7 @@
 
 use crate::lazy::binary::immutable_buffer::ImmutableBuffer;
 use crate::lazy::binary::raw::value::LazyRawBinaryValue_1_0;
-use crate::lazy::decoder::{
-    HasRange, LazyDecoder, LazyRawFieldExpr, LazyRawFieldName, LazyRawReader,
-};
+use crate::lazy::decoder::{HasRange, LazyDecoder, LazyRawFieldExpr, LazyRawReader};
 use crate::lazy::encoding::BinaryEncoding_1_0;
 use crate::lazy::raw_stream_item::{LazyRawStreamItem, RawStreamItem};
 use crate::result::IonFailure;

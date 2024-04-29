@@ -468,7 +468,7 @@ impl<'top> TextBufferView<'top> {
                 )))
             }),
             // Otherwise, match a name/value pair and turn it into a `LazyRawTextField`.
-            Self::match_struct_field_name_and_value_1_1.map(move |(field_name, mut value)| {
+            Self::match_struct_field_name_and_value_1_1.map(move |(field_name, value)| {
                 let field_name = LazyRawTextFieldName_1_1::new(field_name);
                 let field_value = LazyRawTextValue_1_1::new(value);
                 Ok(Some(RawFieldExpr::new(
