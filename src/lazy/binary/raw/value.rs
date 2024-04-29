@@ -114,9 +114,7 @@ impl<'top> LazyRawBinaryValue_1_0<'top> {
             None => {
                 // If there are no annotations, return an empty slice positioned on the type
                 // descriptor.
-                return self
-                    .input
-                    .slice(0, 0);
+                return self.input.slice(0, 0);
             }
             Some(offset_and_length) => offset_and_length,
         };

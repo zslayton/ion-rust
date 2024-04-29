@@ -3,15 +3,17 @@ use std::fmt;
 use std::fmt::{Debug, Formatter};
 use std::ops::{Deref, Range};
 
-use crate::{Bytes, Decimal, Int, IonResult, IonType, Str, Symbol, SymbolRef, Timestamp, Value};
 use crate::lazy::decoder::LazyDecoder;
-use crate::lazy::expanded::{EncodingContext, ExpandedValueSource, LazyExpandedValue, TemplateVariableReference};
 use crate::lazy::expanded::macro_evaluator::{MacroEvaluator, MacroExpr, ValueExpr};
 use crate::lazy::expanded::macro_table::MacroRef;
 use crate::lazy::expanded::r#struct::UnexpandedField;
 use crate::lazy::expanded::sequence::Environment;
+use crate::lazy::expanded::{
+    EncodingContext, ExpandedValueSource, LazyExpandedValue, TemplateVariableReference,
+};
 use crate::lazy::text::raw::v1_1::reader::{MacroAddress, MacroIdRef};
 use crate::result::IonFailure;
+use crate::{Bytes, Decimal, Int, IonResult, IonType, Str, Symbol, SymbolRef, Timestamp, Value};
 
 /// A parameter in a user-defined macro's signature.
 #[derive(Debug, Clone)]
@@ -283,10 +285,11 @@ impl<'top, D: LazyDecoder> Iterator for TemplateStructUnexpandedFieldsIterator<'
         let name: SymbolRef = match &name_element.value {
             TemplateValue::Symbol(s) => s.into(),
             TemplateValue::String(s) => s.text().into(),
-            _ => unreachable!("template struct field had a non-text field name")
+            _ => unreachable!("template struct field had a non-text field name"),
         };
         let value_expr_address = name_expr_address + 1;
-        let value_expr = self.expressions
+        let value_expr = self
+            .expressions
             .get(value_expr_address)
             .expect("template struct had field name with no value");
         let unexpanded_field = match value_expr {
@@ -300,7 +303,10 @@ impl<'top, D: LazyDecoder> Iterator for TemplateStructUnexpandedFieldsIterator<'
                         // accounted for the first expression, so there's nothing else to do here.
                     }
                 };
-                UnexpandedField::TemplateNameValue(name, TemplateElement::new(self.template, element))
+                UnexpandedField::TemplateNameValue(
+                    name,
+                    TemplateElement::new(self.template, element),
+                )
             }
             TemplateBodyValueExpr::MacroInvocation(body_invocation) => {
                 let invoked_macro = self
@@ -788,11 +794,18 @@ impl TemplateBodyVariableReference {
         self.signature_index
     }
     pub fn name<'a>(&self, signature: &'a MacroSignature) -> &'a str {
-        signature.parameters().get(self.signature_index).unwrap().name()
+        signature
+            .parameters()
+            .get(self.signature_index)
+            .unwrap()
+            .name()
     }
     /// Pairs this variable reference with the given template macro reference, allowing information
     /// about the template definition to be retrieved later.
-    pub(crate) fn resolve<'top>(&self, template: TemplateMacroRef<'top>) -> TemplateVariableReference<'top> {
+    pub(crate) fn resolve<'top>(
+        &self,
+        template: TemplateMacroRef<'top>,
+    ) -> TemplateVariableReference<'top> {
         TemplateVariableReference {
             template,
             signature_index: self.signature_index,

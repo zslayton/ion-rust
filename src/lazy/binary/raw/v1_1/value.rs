@@ -2,6 +2,7 @@
 
 use std::ops::Range;
 
+use crate::lazy::decoder::{HasRange, HasSpan};
 use crate::{
     lazy::{
         binary::{
@@ -22,7 +23,6 @@ use crate::{
     types::SymbolId,
     IonResult, IonType,
 };
-use crate::lazy::decoder::{HasRange, HasSpan};
 
 #[derive(Debug, Copy, Clone)]
 pub struct LazyRawBinaryValue_1_1<'top> {
@@ -93,9 +93,7 @@ impl<'top> LazyRawBinaryValue_1_1<'top> {
         let (sequence_offset, sequence_length) = match offset_and_length {
             None => {
                 // If there are no annotations, return an empty slice starting at the opcode.
-                return self
-                    .input
-                    .slice(0, 0);
+                return self.input.slice(0, 0);
             }
             Some(offset_and_length) => offset_and_length,
         };
