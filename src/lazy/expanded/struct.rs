@@ -19,20 +19,17 @@ use crate::result::IonFailure;
 use crate::symbol_ref::AsSymbolRef;
 use crate::{IonError, IonResult, RawSymbolTokenRef, SymbolRef};
 
-/// The union of all possible field representations coming from input data (i.e. raw structs) and
-/// template bodies.
-///
-/// When expanding
+/// A unified type all possible field representations coming from both input data (i.e. raw structs
+/// of some encoding) and template bodies.
+// LazyRawStruct implementations have a `unexpanded_fields` method that lifts its raw fields into
+// `UnexpandedField` instances. Similarly, the `TemplateStructUnexpandedFieldsIterator` turns a
+// template's struct body into `UnexpandedField` instances. The `ExpandedStructIterator` unpacks
+// and expands the field as part of its iteration process.
 #[derive(Debug, Clone, Copy)]
 pub enum UnexpandedField<'top, D: LazyDecoder> {
     RawNameValue(EncodingContext<'top>, D::FieldName<'top>, D::Value<'top>),
-    RawNameEExp(
-        EncodingContext<'top>,
-        D::FieldName<'top>,
-        D::EExpression<'top>,
-    ),
-    // TODO: ^^^ E-expression-as-field for raw; template struct literals cannot contain macro
-    //           invocations (that is: s-expressions) in field position)
+    RawNameEExp(EncodingContext<'top>, D::FieldName<'top>, D::EExp<'top>),
+    RawEExp(EncodingContext<'top>, D::EExp<'top>),
     TemplateNameValue(SymbolRef<'top>, TemplateElement<'top>),
     TemplateNameMacro(SymbolRef<'top>, TemplateMacroInvocation<'top>),
     TemplateNameVariable(
@@ -537,6 +534,24 @@ impl<'top, D: LazyDecoder> ExpandedStructIterator<'top, D> {
                 // is needed to get our next field.
                 Continue(())
             }
+            RawEExp(context, eexp) => {
+                let invocation = match eexp.resolve(context) {
+                    Ok(invocation) => invocation,
+                    Err(e) => return Break(Some(Err(e))),
+                };
+                // The next expression from the iterator was a macro. We expect it to expand to a
+                // single struct whose fields will be merged into the one we're iterating over. For example:
+                //     {a: 1, (:make_struct b 2 c 3), d: 4}
+                // expands to:
+                //     {a: 1, b: 2, c: 3, d: 4}
+                match Self::begin_inlining_struct_from_macro(state, evaluator, invocation.into()) {
+                    // If the macro expanded to a struct as expected, continue the evaluation
+                    // until we get a field to return.
+                    Ok(_) => Continue(()),
+                    // If something went wrong, surface the error.
+                    Err(e) => Break(Some(Err(e))),
+                }
+            }
             TemplateNameMacro(name_symbol, invocation) => {
                 if let Err(e) = evaluator.push(invocation) {
                     return Break(Some(Err(e)));
@@ -580,5 +595,32 @@ impl<'top, D: LazyDecoder> ExpandedStructIterator<'top, D> {
                 }
             }
         }
+    }
+
+    /// Pulls the next value from the evaluator, confirms that it's a struct, and then switches
+    /// the iterator state to `InliningAStruct` so it can begin merging its fields.
+    fn begin_inlining_struct_from_macro<'a, 'name: 'top>(
+        state: &mut ExpandedStructIteratorState<'top, D>,
+        evaluator: &mut MacroEvaluator<'top, D>,
+        invocation: MacroExpr<'top, D>,
+    ) -> IonResult<()> {
+        let mut evaluation = evaluator.evaluate(invocation)?;
+        let expanded_value = match evaluation.next() {
+            Some(Ok(item)) => item,
+            Some(Err(e)) => return Err(e),
+            None => return IonResult::decoding_error(format!("macros in field name position must produce a single struct; '{:?}' produced nothing", invocation)),
+        };
+        let struct_ = match expanded_value.read()? {
+            ExpandedValueRef::Struct(s) => s,
+            other => {
+                return IonResult::decoding_error(format!(
+                    "macros in field name position must produce structs; '{:?}' produced: {:?}",
+                    invocation, other
+                ))
+            }
+        };
+        let iter: &'top mut ExpandedStructIterator<'top, D> = struct_.bump_iter();
+        *state = ExpandedStructIteratorState::InliningAStruct(struct_, iter);
+        Ok(())
     }
 }

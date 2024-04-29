@@ -516,11 +516,16 @@ impl<'a> Debug for LazyRawTextStruct_1_1<'a> {
         write!(f, "{{")?;
         for field_result in self.iter() {
             let field = field_result?;
-            let name = field.name();
-            match field.value_expr() {
-                RawValueExpr::ValueLiteral(value) => write!(f, "{name:?}: {value:?}, "),
-                RawValueExpr::MacroInvocation(invocation) => {
-                    write!(f, "{name:?}: {invocation:?}, ")
+            use LazyRawFieldExpr::*;
+            match field {
+                NameValue(name, value) => {
+                    write!(f, "{name:?}: {value:?}")
+                }
+                NameEExp(name, eexp) => {
+                    write!(f, "{name:?}: {eexp:?}")
+                }
+                EExp(eexp) => {
+                    write!(f, "{eexp:?}")
                 }
             }?;
         }
@@ -670,48 +675,6 @@ impl<'top> Iterator for RawTextStructIterator_1_1<'top> {
     }
 }
 
-impl<'top> RawTextStructIterator_1_1<'top> {
-    // TODO: DRY with RawTextStructIterator_1_0
-    pub(crate) fn find_span(&self) -> IonResult<Range<usize>> {
-        // The input has already skipped past the opening delimiter.
-        let start = self.input.offset() - 1;
-        // We need to find the input slice containing the closing delimiter.
-        let input_after_last = if let Some(field_result) = self.last() {
-            // If there are any field expressions, we need to isolate the input slice that follows
-            // the last one.
-            match field_result?.value_expr() {
-                // foo: bar
-                RawValueExpr::ValueLiteral(value) => value
-                    .matched
-                    .input
-                    .slice_to_end(value.matched.encoded_value.total_length()),
-                // foo: (:bar ...)
-                RawValueExpr::MacroInvocation(invocation) => {
-                    self.input.slice_to_end(invocation.input.len())
-                }
-            }
-        } else {
-            // ...or there aren't fields, so it's just the input after the opening delimiter.
-            self.input
-        };
-        let (mut input_after_ws, _ws) =
-            input_after_last
-                .match_optional_comments_and_whitespace()
-                .with_context("seeking the end of a struct", input_after_last)?;
-        // Skip an optional comma and more whitespace
-        if input_after_ws.bytes().first() == Some(&b',') {
-            (input_after_ws, _) = input_after_ws
-                .slice_to_end(1)
-                .match_optional_comments_and_whitespace()
-                .with_context("skipping a list's trailing comma", input_after_ws)?;
-        }
-        let (input_after_end, _end_delimiter) = satisfy(|c| c == b'}' as char)(input_after_ws)
-            .with_context("seeking the closing delimiter of a struct", input_after_ws)?;
-        let end = input_after_end.offset();
-        Ok(start..end)
-    }
-}
-
 /// Wraps a [`RawTextStructIterator_1_1`] (which parses the body of a struct) and caches the field
 /// expressions the iterator yields along the way. Finally, returns a `Range<usize>` representing
 /// the span of input bytes that the struct occupies.
@@ -745,18 +708,17 @@ impl<'top> TextStructSpanFinder_1_1<'top> {
         }
 
         // We need to find the input slice containing the closing delimiter.
-        let input_after_last = if let Some(field_result) = child_expr_cache.last() {
+        let input_after_last = if let Some(field) = child_expr_cache.last() {
             // If there are any field expressions, we need to isolate the input slice that follows
             // the last one.
-            match field_result.value_expr() {
-                // foo: bar
-                RawValueExpr::ValueLiteral(value) => value
+            use LazyRawFieldExpr::*;
+            match field {
+                NameValue(_, value) => value
                     .matched
                     .input
                     .slice_to_end(value.matched.encoded_value.total_length()),
-                // foo: (:bar ...)
-                RawValueExpr::MacroInvocation(invocation) => {
-                    self.iterator.input.slice_to_end(invocation.input.len())
+                NameEExp(_, eexp) | EExp(eexp) => {
+                    self.iterator.input.slice_to_end(eexp.input.len())
                 }
             }
         } else {

@@ -1,3 +1,9 @@
+use std::fmt::{Debug, Formatter};
+use std::mem;
+use std::ops::Range;
+
+use num_bigint::{BigInt, BigUint, Sign};
+
 use crate::binary::constants::v1_0::{length_codes, IVM};
 use crate::binary::int::DecodedInt;
 use crate::binary::uint::DecodedUInt;
@@ -7,17 +13,13 @@ use crate::lazy::binary::encoded_value::EncodedValue;
 use crate::lazy::binary::raw::r#struct::LazyRawBinaryFieldName_1_0;
 use crate::lazy::binary::raw::type_descriptor::{Header, TypeDescriptor, ION_1_0_TYPE_DESCRIPTORS};
 use crate::lazy::binary::raw::value::LazyRawBinaryValue_1_0;
-use crate::lazy::decoder::{LazyRawFieldExpr, RawFieldExpr, RawValueExpr};
+use crate::lazy::decoder::LazyRawFieldExpr;
 use crate::lazy::encoder::binary::v1_1::flex_int::FlexInt;
 use crate::lazy::encoder::binary::v1_1::flex_uint::FlexUInt;
 use crate::lazy::encoding::BinaryEncoding_1_0;
 use crate::result::IonFailure;
 use crate::types::UInt;
 use crate::{Int, IonError, IonResult, IonType};
-use num_bigint::{BigInt, BigUint, Sign};
-use std::fmt::{Debug, Formatter};
-use std::mem;
-use std::ops::Range;
 
 // This limit is used for stack-allocating buffer space to encode/decode UInts.
 const UINT_STACK_BUFFER_SIZE: usize = 16;
@@ -656,10 +658,7 @@ impl<'a> ImmutableBuffer<'a> {
         let field_name = LazyRawBinaryFieldName_1_0::new(field_id, matched_field_id);
 
         let field_value = input_after_field_id.read_value(type_descriptor)?;
-        Ok(Some(RawFieldExpr::new(
-            field_name,
-            RawValueExpr::ValueLiteral(field_value),
-        )))
+        Ok(Some(LazyRawFieldExpr::NameValue(field_name, field_value)))
     }
 
     #[cold]
@@ -815,9 +814,11 @@ pub struct AnnotationsWrapper {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::IonError;
     use num_traits::Num;
+
+    use crate::IonError;
+
+    use super::*;
 
     fn input_test<A: AsRef<[u8]>>(input: A) {
         let input = ImmutableBuffer::new(input.as_ref());

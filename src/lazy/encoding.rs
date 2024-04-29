@@ -134,7 +134,7 @@ impl LazyDecoder for BinaryEncoding_1_0 {
     type FieldName<'top> = LazyRawBinaryFieldName_1_0<'top>;
     type AnnotationsIterator<'top> = RawBinaryAnnotationsIterator<'top>;
     // Macros are not supported in Ion 1.0
-    type EExpression<'top> = Never;
+    type EExp<'top> = Never;
 }
 
 impl LazyDecoder for TextEncoding_1_0 {
@@ -147,7 +147,7 @@ impl LazyDecoder for TextEncoding_1_0 {
     type FieldName<'top> = LazyRawTextFieldName_1_0<'top>;
     type AnnotationsIterator<'top> = RawTextAnnotationsIterator<'top>;
     // Macros are not supported in Ion 1.0
-    type EExpression<'top> = Never;
+    type EExp<'top> = Never;
 }
 
 impl LazyDecoder for TextEncoding_1_1 {
@@ -159,7 +159,7 @@ impl LazyDecoder for TextEncoding_1_1 {
     type Struct<'top> = LazyRawTextStruct_1_1<'top>;
     type FieldName<'top> = LazyRawTextFieldName_1_1<'top>;
     type AnnotationsIterator<'top> = RawTextAnnotationsIterator<'top>;
-    type EExpression<'top> = RawTextEExpression_1_1<'top>;
+    type EExp<'top> = RawTextEExpression_1_1<'top>;
 }
 
 impl LazyDecoder for BinaryEncoding_1_1 {
@@ -172,7 +172,7 @@ impl LazyDecoder for BinaryEncoding_1_1 {
     type Struct<'top> = LazyRawBinaryStruct_1_1<'top>;
     type AnnotationsIterator<'top> = RawBinaryAnnotationsIterator_1_1<'top>;
     // TODO: implement macros in 1.1
-    type EExpression<'top> = Never;
+    type EExp<'top> = Never;
 }
 
 /// Marker trait for types that represent value literals in an Ion stream of some encoding.

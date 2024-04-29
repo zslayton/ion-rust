@@ -328,12 +328,9 @@ impl<'top, D: LazyDecoder> Iterator for TemplateStructUnexpandedFieldsIterator<'
                 UnexpandedField::TemplateNameMacro(name, invocation)
             }
             TemplateBodyValueExpr::Variable(variable) => {
-                let arg_expr = match self.environment.get_expected(variable.signature_index()) {
-                    Ok(expr) => expr,
-                    Err(e) => return Some(Err(e)),
-                };
+                let arg_expr = self.environment.get_expected(variable.signature_index()).expect("reference to non-existent parameter");
                 let variable_ref = variable.resolve(self.template);
-                UnexpandedField::TemplateNameVariable(name, (variable_ref, *arg_expr))
+                UnexpandedField::TemplateNameVariable(name, (variable_ref, arg_expr))
             }
         };
         self.index += 2;
@@ -764,7 +761,7 @@ impl<'top, D: LazyDecoder> Iterator for TemplateMacroInvocationArgsIterator<'top
                 .environment
                 .get_expected(variable_ref.signature_index())
             {
-                Ok(expr) => *expr,
+                Ok(expr) => expr,
                 Err(e) => return Some(Err(e)),
             },
             TemplateBodyValueExpr::MacroInvocation(body_invocation) => {

@@ -210,10 +210,10 @@ impl<'data> DataSource<'data> {
         };
 
         // If the field name we read doesn't start where we began reading, there was a NOP field.
-        let num_nop_bytes = field.name().range().start - buffer.offset();
+        let field_range = field.range();
+        let num_nop_bytes = field_range.start - buffer.offset();
         self.buffer = buffer.consume(num_nop_bytes);
-        self.bytes_to_skip = field.value_expr().range().end - self.buffer.offset();
-        // self.bytes_to_skip = field.encoded_value.total_length();
+        self.bytes_to_skip = field_range.end - self.buffer.offset();
         Ok(Some(field))
     }
 }

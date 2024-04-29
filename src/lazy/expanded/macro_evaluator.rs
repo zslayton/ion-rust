@@ -33,7 +33,7 @@ use crate::{IonError, IonResult, RawSymbolTokenRef};
 
 /// The syntactic entity in format `D` that represents an e-expression. This expression has not
 /// yet been resolved in the current encoding context.
-pub trait RawEExpression<'top, D: LazyDecoder<EExpression<'top> = Self>>:
+pub trait RawEExpression<'top, D: LazyDecoder<EExp<'top> = Self>>:
     HasSpan<'top> + Debug + Copy + Clone
 {
     /// An iterator that yields the macro invocation's arguments in order.
@@ -144,9 +144,7 @@ impl<'top, D: LazyDecoder> ArgExpr<'top, D> {
     ) -> IonResult<ValueExpr<'top, D>> {
         match self {
             ArgExpr::ValueLiteral(value) => Ok(ValueExpr::ValueLiteral(*value)),
-            ArgExpr::Variable(variable) => environment
-                .get_expected(variable.signature_index())
-                .copied(),
+            ArgExpr::Variable(variable) => environment.get_expected(variable.signature_index()),
             ArgExpr::MacroInvocation(invocation) => Ok(ValueExpr::MacroInvocation(*invocation)),
         }
     }
@@ -682,7 +680,7 @@ impl<'top> TemplateExpansion<'top> {
                 ))
             }
             TemplateBodyValueExpr::Variable(variable) => {
-                *environment.get_expected(variable.signature_index())?
+                environment.get_expected(variable.signature_index())?
             }
             TemplateBodyValueExpr::MacroInvocation(raw_invocation) => {
                 let invocation = raw_invocation.resolve(self.template, context);
@@ -1116,6 +1114,10 @@ mod tests {
                 e: (:make_string foo bar baz),
                 
                 f: 5,
+
+                // If a macro appears in field name position, it MUST produce a single struct (which
+                // may be empty). That struct's fields will be merged into the host struct.
+                (:values {g: 6, h: 7}),
                 
                 g: 8
             }
@@ -1129,6 +1131,8 @@ mod tests {
                 // no 'd',
                 e: "foobarbaz",
                 f: 5,
+                g: 6,
+                h: 7,
                 g: 8
             }
             "#,

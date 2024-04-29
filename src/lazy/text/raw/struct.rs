@@ -7,7 +7,6 @@ use nom::character::streaming::satisfy;
 use crate::lazy::decoder::private::LazyContainerPrivate;
 use crate::lazy::decoder::{
     HasRange, HasSpan, LazyRawFieldExpr, LazyRawFieldName, LazyRawStruct, LazyRawValue,
-    RawValueExpr,
 };
 use crate::lazy::encoding::TextEncoding_1_0;
 use crate::lazy::text::buffer::TextBufferView;
@@ -35,9 +34,7 @@ impl<'top> RawTextStructIterator_1_0<'top> {
         let start = self.input.offset() - 1;
         // We need to find the input slice containing the closing delimiter. It's either...
         let input_after_last = if let Some(field_result) = self.last() {
-            let (_name, RawValueExpr::ValueLiteral(value)) = field_result?.into_pair() else {
-                unreachable!("struct field with macro invocation in Ion 1.0");
-            };
+            let (_name, value) = field_result?.expect_name_value()?;
             // ...the input slice that follows the last field...
             value
                 .matched
@@ -159,11 +156,11 @@ impl<'top> IntoIterator for LazyRawTextStruct_1_0<'top> {
 mod tests {
     use std::ops::Range;
 
-    use crate::lazy::decoder::{HasRange, HasSpan, LazyRawReader, LazyRawStruct, LazyRawValue};
-    use crate::lazy::text::raw::reader::LazyRawTextReader_1_0;
-    use crate::lazy::text::raw::v1_1::reader::LazyRawTextReader_1_1;
-    use crate::IonResult;
     use bumpalo::Bump as BumpAllocator;
+
+    use crate::lazy::decoder::{HasRange, HasSpan, LazyRawStruct, LazyRawValue};
+    use crate::lazy::text::raw::reader::LazyRawTextReader_1_0;
+    use crate::IonResult;
 
     fn expect_struct_range(ion_data: &str, expected: Range<usize>) -> IonResult<()> {
         let allocator = BumpAllocator::new();
@@ -232,30 +229,32 @@ mod tests {
         ];
         for (input, field_name_ranges) in tests {
             let bump = bumpalo::Bump::new();
-            let mut reader = LazyRawTextReader_1_1::new(input.as_bytes());
+            let mut reader = LazyRawTextReader_1_0::new(input.as_bytes());
             let struct_ = reader
                 .next(&bump)?
                 .expect_value()?
                 .read()?
                 .expect_struct()?;
-            for (field_result, (name, range)) in struct_.iter().zip(field_name_ranges.iter()) {
-                let field = field_result?;
+            for (field_result, (expected_name, expected_range)) in
+                struct_.iter().zip(field_name_ranges.iter())
+            {
+                let field_name = field_result?.name();
                 assert_eq!(
-                    field.name().span(),
-                    name.as_bytes(),
-                    "span failure for input {input} -> field {name}"
+                    field_name.span(),
+                    expected_name.as_bytes(),
+                    "span failure for input {input} -> field {expected_name}"
                 );
                 assert_eq!(
-                    field.name().range(),
-                    *range,
-                    "range failure for input {input} -> field {name}"
+                    field_name.range(),
+                    *expected_range,
+                    "range failure for input {input} -> field {expected_name}"
                 );
                 println!(
                     "SUCCESS: input {} -> field {} -> {} ({:?})",
                     input,
-                    name,
-                    std::str::from_utf8(field.name().span()).unwrap(),
-                    field.name().range()
+                    expected_name,
+                    std::str::from_utf8(field_name.span()).unwrap(),
+                    field_name.range()
                 );
             }
         }

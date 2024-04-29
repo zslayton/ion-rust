@@ -27,7 +27,7 @@ use crate::lazy::binary::raw::value::LazyRawBinaryValue_1_0;
 use crate::lazy::decoder::private::LazyContainerPrivate;
 use crate::lazy::decoder::{
     HasRange, HasSpan, LazyDecoder, LazyRawFieldExpr, LazyRawFieldName, LazyRawReader,
-    LazyRawSequence, LazyRawStruct, LazyRawValue, LazyRawValueExpr, RawFieldExpr, RawValueExpr,
+    LazyRawSequence, LazyRawStruct, LazyRawValue, LazyRawValueExpr, RawValueExpr,
 };
 use crate::lazy::encoding::{
     BinaryEncoding_1_0, BinaryEncoding_1_1, TextEncoding_1_0, TextEncoding_1_1,
@@ -69,7 +69,7 @@ impl LazyDecoder for AnyEncoding {
     type Struct<'top> = LazyRawAnyStruct<'top>;
     type FieldName<'top> = LazyRawAnyFieldName<'top>;
     type AnnotationsIterator<'top> = RawAnyAnnotationsIterator<'top>;
-    type EExpression<'top> = LazyRawAnyEExpression<'top>;
+    type EExp<'top> = LazyRawAnyEExpression<'top>;
 }
 #[derive(Debug, Copy, Clone)]
 pub struct LazyRawAnyEExpression<'top> {
@@ -1071,13 +1071,12 @@ impl<'data> From<LazyRawFieldExpr<'data, TextEncoding_1_0>>
     for LazyRawFieldExpr<'data, AnyEncoding>
 {
     fn from(text_field: LazyRawFieldExpr<'data, TextEncoding_1_0>) -> Self {
-        let (name, value_expr) = text_field.into_pair();
-        let RawValueExpr::ValueLiteral(value) = value_expr else {
-            unreachable!("name/e-expr pair in text Ion 1.0 struct")
-        };
-        // Convert the text-encoded value into an any-encoded value
-        let value = LazyRawAnyValue::from(value);
-        RawFieldExpr::new(name, RawValueExpr::ValueLiteral(value))
+        use LazyRawFieldExpr::*;
+        match text_field {
+            NameValue(name, value) => NameValue(name.into(), value.into()),
+            NameEExp(_, _) => unreachable!("(name, e-exp) field in text Ion 1.0"),
+            EExp(_) => unreachable!("e-exp field in text Ion 1.0"),
+        }
     }
 }
 
@@ -1085,12 +1084,12 @@ impl<'data> From<LazyRawFieldExpr<'data, BinaryEncoding_1_0>>
     for LazyRawFieldExpr<'data, AnyEncoding>
 {
     fn from(binary_field: LazyRawFieldExpr<'data, BinaryEncoding_1_0>) -> Self {
-        let (name, value_expr) = binary_field.into_pair();
-        let RawValueExpr::ValueLiteral(value) = value_expr else {
-            unreachable!("name/e-expr pair in binary Ion 1.0 struct")
-        };
-        // Convert the text-encoded value into an any-encoded value
-        RawFieldExpr::new(name, RawValueExpr::ValueLiteral(value))
+        use LazyRawFieldExpr::*;
+        match binary_field {
+            NameValue(name, value) => NameValue(name.into(), value.into()),
+            NameEExp(_, _) => unreachable!("(name, e-exp) field in binary Ion 1.0"),
+            EExp(_) => unreachable!("e-exp field in binary Ion 1.0"),
+        }
     }
 }
 
@@ -1098,14 +1097,11 @@ impl<'data> From<LazyRawFieldExpr<'data, TextEncoding_1_1>>
     for LazyRawFieldExpr<'data, AnyEncoding>
 {
     fn from(text_field: LazyRawFieldExpr<'data, TextEncoding_1_1>) -> Self {
-        let (name, value_expr) = text_field.into_pair();
-        match value_expr {
-            RawValueExpr::ValueLiteral(value) => {
-                RawFieldExpr::new(name, RawValueExpr::ValueLiteral(value))
-            }
-            RawValueExpr::MacroInvocation(eexp) => {
-                RawFieldExpr::new(name, RawValueExpr::MacroInvocation(eexp))
-            }
+        use LazyRawFieldExpr::*;
+        match text_field {
+            NameValue(name, value) => NameValue(name.into(), value.into()),
+            NameEExp(name, eexp) => NameEExp(name.into(), eexp.into()),
+            EExp(eexp) => EExp(eexp.into()),
         }
     }
 }
@@ -1114,12 +1110,12 @@ impl<'data> From<LazyRawFieldExpr<'data, BinaryEncoding_1_1>>
     for LazyRawFieldExpr<'data, AnyEncoding>
 {
     fn from(binary_field: LazyRawFieldExpr<'data, BinaryEncoding_1_1>) -> Self {
-        let (name, value_expr) = binary_field.into_pair();
-        let RawValueExpr::ValueLiteral(value) = value_expr else {
-            todo!("macro invocation in Ion 1.1 binary not implemented")
-        };
-        // Convert the binary-encoded value into an any-encoded value
-        RawFieldExpr::new(name, RawValueExpr::ValueLiteral(value))
+        use LazyRawFieldExpr::*;
+        match binary_field {
+            NameValue(name, value) => NameValue(name.into(), value.into()),
+            NameEExp(_, _) => todo!("(name, e-exp) field in binary Ion 1.1"),
+            EExp(_) => todo!("e-exp field in binary Ion 1.1"),
+        }
     }
 }
 

@@ -10,9 +10,7 @@ use crate::lazy::binary::raw::annotations_iterator::RawBinaryAnnotationsIterator
 use crate::lazy::binary::raw::reader::DataSource;
 use crate::lazy::binary::raw::value::LazyRawBinaryValue_1_0;
 use crate::lazy::decoder::private::LazyContainerPrivate;
-use crate::lazy::decoder::{
-    HasRange, HasSpan, LazyRawFieldExpr, LazyRawFieldName, LazyRawStruct, RawFieldExpr,
-};
+use crate::lazy::decoder::{HasRange, HasSpan, LazyRawFieldExpr, LazyRawFieldName, LazyRawStruct};
 use crate::lazy::encoding::BinaryEncoding_1_0;
 
 #[derive(Copy, Clone)]
@@ -93,10 +91,7 @@ impl<'top> Iterator for RawBinaryStructIterator_1_0<'top> {
             .source
             .try_parse_next_field(ImmutableBuffer::peek_field)
         {
-            Ok(Some(lazy_raw_value)) => Some(Ok(RawFieldExpr::new(
-                lazy_raw_value.name(),
-                lazy_raw_value.value_expr(),
-            ))),
+            Ok(Some(field)) => Some(Ok(field)),
             Ok(None) => None,
             Err(e) => Some(Err(e)),
         }
@@ -157,24 +152,26 @@ mod tests {
         for (input, field_name_ranges) in tests {
             let mut reader = LazyRawBinaryReader_1_0::new(input);
             let struct_ = reader.next()?.expect_value()?.read()?.expect_struct()?;
-            for (field_result, (name, range)) in struct_.iter().zip(field_name_ranges.iter()) {
-                let field = field_result?;
+            for (field_result, (expected_name, range)) in
+                struct_.iter().zip(field_name_ranges.iter())
+            {
+                let name = field_result?.name();
                 assert_eq!(
-                    field.name().read()?,
-                    *name,
+                    name.read()?,
+                    *expected_name,
                     "span failure for input {input:0X?} -> field {name:?}"
                 );
                 assert_eq!(
-                    field.name().range(),
+                    name.range(),
                     *range,
                     "range failure for input {input:0X?} -> field {name:?}"
                 );
                 println!(
                     "SUCCESS: input {:0X?} -> field {:?} -> {:0X?} ({:?})",
                     input,
-                    name,
-                    field.name().span(),
-                    field.name().range()
+                    expected_name,
+                    name.span(),
+                    name.range()
                 );
             }
         }

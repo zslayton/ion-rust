@@ -20,7 +20,7 @@ pub enum RawStreamItem<V: Debug, E: Debug> {
 }
 
 pub type LazyRawStreamItem<'top, D> =
-    RawStreamItem<<D as LazyDecoder>::Value<'top>, <D as LazyDecoder>::EExpression<'top>>;
+    RawStreamItem<<D as LazyDecoder>::Value<'top>, <D as LazyDecoder>::EExp<'top>>;
 
 impl<V: Debug, E: Debug> RawStreamItem<V, E> {
     /// If this item is an Ion version marker (IVM), returns `Some((major, minor))` indicating the

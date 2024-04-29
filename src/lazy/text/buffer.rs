@@ -21,7 +21,7 @@ use nom::multi::{fold_many1, fold_many_m_n, many0_count, many1_count};
 use nom::sequence::{delimited, pair, preceded, separated_pair, terminated, tuple};
 use nom::{AsBytes, CompareResult, IResult, InputLength, InputTake, Needed, Parser};
 
-use crate::lazy::decoder::{LazyRawFieldExpr, LazyRawValueExpr, RawFieldExpr, RawValueExpr};
+use crate::lazy::decoder::{LazyRawFieldExpr, LazyRawValueExpr, RawValueExpr};
 use crate::lazy::encoding::{TextEncoding, TextEncoding_1_0, TextEncoding_1_1};
 use crate::lazy::never::Never;
 use crate::lazy::raw_stream_item::{LazyRawStreamItem, RawStreamItem};
@@ -413,9 +413,9 @@ impl<'top> TextBufferView<'top> {
             Self::match_struct_field_name_and_value.map(move |(matched_field_name, value)| {
                 let field_name = LazyRawTextFieldName_1_0::new(matched_field_name);
                 let field_value = LazyRawTextValue_1_0::new(value);
-                Some(LazyRawFieldExpr::<'top, TextEncoding_1_0>::new(
+                Some(LazyRawFieldExpr::<'top, TextEncoding_1_0>::NameValue(
                     field_name,
-                    RawValueExpr::ValueLiteral(field_value),
+                    field_value,
                 ))
             }),
         ))(input_including_field_name)
@@ -461,20 +461,21 @@ impl<'top> TextBufferView<'top> {
         let (input_after_field, field_expr_result) = alt((
             // If the next thing in the input is a `}`, return `None`.
             Self::match_struct_end.map(|_| Ok(None)),
+            terminated(
+                Self::match_e_expression.map(|eexp| Ok(Some(LazyRawFieldExpr::EExp(eexp)))),
+                whitespace_and_then(alt((tag(","), peek(tag("}"))))),
+            ),
             Self::match_struct_field_name_and_e_expression_1_1.map(|(field_name, invocation)| {
-                Ok(Some(RawFieldExpr::new(
+                Ok(Some(LazyRawFieldExpr::NameEExp(
                     LazyRawTextFieldName_1_1::new(field_name),
-                    RawValueExpr::MacroInvocation(invocation),
+                    invocation,
                 )))
             }),
             // Otherwise, match a name/value pair and turn it into a `LazyRawTextField`.
             Self::match_struct_field_name_and_value_1_1.map(move |(field_name, value)| {
                 let field_name = LazyRawTextFieldName_1_1::new(field_name);
                 let field_value = LazyRawTextValue_1_1::new(value);
-                Ok(Some(RawFieldExpr::new(
-                    field_name,
-                    RawValueExpr::ValueLiteral(field_value),
-                )))
+                Ok(Some(LazyRawFieldExpr::NameValue(field_name, field_value)))
             }),
         ))(input_including_field_name)?;
         Ok((input_after_field, field_expr_result?))

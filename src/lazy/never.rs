@@ -33,7 +33,7 @@ impl HasRange for Never {
 
 // Ion 1.0 uses `Never` as a placeholder type for MacroInvocation.
 // The compiler should optimize these methods away.
-impl<'top, D: LazyDecoder<EExpression<'top> = Self>> RawEExpression<'top, D> for Never {
+impl<'top, D: LazyDecoder<EExp<'top> = Self>> RawEExpression<'top, D> for Never {
     // These use Box<dyn> to avoid defining yet another placeholder type.
     type RawArgumentsIterator<'a> = Box<dyn Iterator<Item = IonResult<LazyRawValueExpr<'top, D>>>>;
 
