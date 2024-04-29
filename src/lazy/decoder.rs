@@ -195,7 +195,7 @@ impl<N: Copy + Debug, V: Copy + Debug, M: Copy + Debug> RawFieldExpr<N, V, M> {
     }
 }
 
-impl<'top, N: Copy + HasRange, V: Copy + HasRange, M: Copy + HasRange> HasRange
+impl<N: Copy + HasRange, V: Copy + HasRange, M: Copy + HasRange> HasRange
     for RawFieldExpr<N, V, M>
 {
     // This type does not offer a `span()` method get get the bytes of the entire field.

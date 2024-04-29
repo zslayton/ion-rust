@@ -25,7 +25,7 @@ impl<'top> HasSpan<'top> for Never {
     }
 }
 
-impl<'top> HasRange for Never {
+impl HasRange for Never {
     fn range(&self) -> Range<usize> {
         unreachable!("<Never as HasSpan>::range")
     }
