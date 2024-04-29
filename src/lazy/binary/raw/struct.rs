@@ -142,12 +142,14 @@ mod tests {
     fn field_name_ranges() -> IonResult<()> {
         // For each pair below, we'll confirm that the top-level struct's field names are found to
         // occupy the specified input ranges.
-        let tests: &[(&[u8], &[(RawSymbolTokenRef, Range<usize>)])] = &[
+        type FieldNameAndRange<'a> = (RawSymbolTokenRef<'a>, Range<usize>);
+        type FieldTest<'a> = (&'a [u8], &'a [FieldNameAndRange<'a>]);
+        let tests: &[FieldTest] = &[
             // (Ion input, expected ranges of the struct's field names)
             (
-                &[0xD2, 0x84, 0x80],
+                &[0xD2, 0x84, 0x80], // {name: ""}
                 &[(RawSymbolTokenRef::SymbolId(4), 1..2)],
-            ), // {name: ""}
+            ),
         ];
         for (input, field_name_ranges) in tests {
             let mut reader = LazyRawBinaryReader_1_0::new(input);

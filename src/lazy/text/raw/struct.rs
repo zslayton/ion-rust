@@ -206,7 +206,9 @@ mod tests {
     fn field_name_ranges() -> IonResult<()> {
         // For each pair below, we'll confirm that the top-level struct's field names are found to
         // occupy the specified input ranges.
-        let tests: &[(&str, &[(&str, Range<usize>)])] = &[
+        type FieldNameAndRange<'a> = (&'a str, Range<usize>);
+        type FieldTest<'a> = (&'a str, &'a [FieldNameAndRange<'a>]);
+        let tests: &[FieldTest] = &[
             // (Ion input, expected ranges of the struct's field names)
             ("{a:1}", &[("a", 1..2)]),
             ("{a: 1}", &[("a", 1..2)]),
