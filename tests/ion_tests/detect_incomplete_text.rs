@@ -15,6 +15,7 @@ fn detect_incomplete_input(file_name: &str) {
     if skip_list_1_1.contains(&file_name.to_owned()) {
         return;
     }
+    println!("{file_name} was not in skip list:\n{skip_list_1_1:#?}");
     println!("testing {file_name}");
     let file = fs::File::open(file_name).unwrap();
     let buf_reader = BufReader::new(file);
